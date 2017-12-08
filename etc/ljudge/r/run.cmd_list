@@ -1,2 +1,5 @@
-Rscript
+/usr/lib/R/bin/exec/R
+--slave
+--vanilla
+-f
 $src

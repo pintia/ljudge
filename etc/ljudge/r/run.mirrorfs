@@ -1,0 +1,10 @@
+mkdir /dev
+mkdir /tmp
+mkdir /tmp/R_TempDir
+mirror /lib/
+mirror /lib64/
+mirror /usr/lib*/
+mirror /etc/ld.so.cache
+
+mirror /etc/R/
+mirror /etc/alternatives/
