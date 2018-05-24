@@ -145,6 +145,7 @@ struct Options {
   bool direct_mode;  // if true, just run the program and prints the result
   int nthread;  // how many testcases can run in parallel. default is decided by omp (cpu cores
   bool skip_on_first_failure;  // skip test cases after first failure occured
+  bool reuse_netns; // pass to lrun, for better performance
 };
 
 struct LrunArgs : public vector<string> {
@@ -213,7 +214,6 @@ struct LrunArgs : public vector<string> {
     append("--basic-devices", "true");
     append("--remount-dev", "true");
     append("--network", "false");
-    append("--reuse-netns", "true");
     append("--chdir", "/tmp");
     append("--env", "ONLINE_JUDGE", "1");
     append("--env", "LANG", "en_US.UTF-8");
@@ -690,6 +690,7 @@ static void print_usage() {
       "         [--threads n]\n"
 #endif
       "         [--skip-on-first-failure]\n"
+      "         [--reuse-netns]\n"
       "         [--max-cpu-time seconds] [--max-real-time seconds]\n"
       "         [--max-memory bytes] [--max-output bytes]\n"
       "         [--max-checker-cpu-time seconds] [--max-checker-real-time seconds]\n"
@@ -1392,6 +1393,8 @@ static Options parse_cli_options(int argc, const char *argv[]) {
         fatal("'skip-on-first-faiulure' must be applied with thread = 1")
       }
       options.skip_on_first_failure = true;
+    } else if (option == "reuse-netns") {
+      options.reuse_netns = true;
     } else {
       fatal("'%s' is not a valid option", argv[i]);
     }
@@ -1737,7 +1740,7 @@ static map<string, string> get_mappings(const string& src_name, const string& ex
   return mappings;
 }
 
-static CompileResult compile_code(const string& etc_dir, const string& cache_dir, const string& dest /* work dir */, const string& code_path, const Limit& limit) {
+static CompileResult compile_code(const string& etc_dir, const string& cache_dir, const string& dest /* work dir */, const string& code_path, const Limit& limit, bool reuse_netns) {
   log_debug("compile_code: %s %s", code_path.c_str(), dest.c_str());
 
   CompileResult result;
@@ -1786,6 +1789,9 @@ static CompileResult compile_code(const string& etc_dir, const string& cache_dir
     lrun_args.append_default();
     lrun_args.append("--chroot", chroot_path);
     lrun_args.append("--bindfs", fs::join(chroot_path, "/tmp"), dest);
+    if (reuse_netns) {
+        lrun_args.append("--reuse-netns", "true");
+    }
     lrun_args.append(limit);
 
     map<string, string> mappings = get_mappings(src_name, exe_name, dest);
@@ -1841,6 +1847,7 @@ static LrunResult run_code(
     const string& dest,
     const string& code_path,
     const Limit& limit,
+    bool reuse_netns,
     const string& stdin_path,
     const string& stdout_path,
     const string& stderr_path = DEV_NULL,
@@ -1871,6 +1878,9 @@ static LrunResult run_code(
     lrun_args.append_default();
     lrun_args.append("--chroot", chroot_path);
     lrun_args.append("--bindfs-ro", fs::join(chroot_path, "/tmp"), dest);
+    if (reuse_netns) {
+      lrun_args.append("--reuse-netns", "true");
+    }
     lrun_args.append(get_override_lrun_args(etc_dir, cache_dir, code_path, ENV_RUN, chroot_path, run_cmd.size() >= 2 ? (*run_cmd.begin()) : "" ));
     lrun_args.append(limit);
     lrun_args.append(escape_list(extra_lrun_args, mappings));
@@ -1948,7 +1958,7 @@ static void prepare_checker_mount_bind_files(const string& dest) {
   fs::touch(fs::join(dest, "user_code"));
 }
 
-static void run_custom_checker(j::object& result, const string& etc_dir, const string& cache_dir, const string& code_path, const string& checker_code_path, const map<string, string>& envs, const Testcase& testcase, const string& user_output_path) {
+static void run_custom_checker(j::object& result, const string& etc_dir, const string& cache_dir, const string& code_path, const string& checker_code_path, const map<string, string>& envs, const Testcase& testcase, const string& user_output_path, bool reuse_netns) {
   log_debug("run_custom_checker: %s %s", testcase.output_path.c_str(), user_output_path.c_str());
 
   // prepare check environment
@@ -1960,7 +1970,9 @@ static void run_custom_checker(j::object& result, const string& etc_dir, const s
 
   // extra lrun args
   LrunArgs lrun_args;
-
+  if (reuse_netns) {
+    lrun_args.append("--reuse-netns", "true");
+  }
   lrun_args.append("--bindfs-ro", "$chroot/tmp/input", get_full_path(testcase.input_path));
   lrun_args.append("--bindfs-ro", "$chroot/tmp/output", get_full_path(testcase.output_path));
   lrun_args.append("--bindfs-ro", "$chroot/tmp/user_output", get_full_path(user_output_path));
@@ -1982,7 +1994,7 @@ static void run_custom_checker(j::object& result, const string& etc_dir, const s
 
     // dest must be the same as the dest used for compile_code
     string dest = get_code_work_dir(fs::join(cache_dir, SUBDIR_CHECKER), checker_code_path);
-    lrun_result = run_code(etc_dir, cache_dir, dest, checker_code_path, testcase.checker_limit, testcase.input_path, output_path, DEV_NULL /* stderr */, lrun_args, ENV_CHECK, checker_argv);
+    lrun_result = run_code(etc_dir, cache_dir, dest, checker_code_path, testcase.checker_limit, reuse_netns, testcase.input_path, output_path, DEV_NULL /* stderr */, lrun_args, ENV_CHECK, checker_argv);
     checker_output = fs::nread(output_path, TRUNC_LOG);
   }
 
@@ -2014,7 +2026,7 @@ static void run_custom_checker(j::object& result, const string& etc_dir, const s
   result["result"] = j::value(status);
 }
 
-static j::object run_testcase(const string& etc_dir, const string& cache_dir, const string& code_path, const string& checker_code_path, const map<string, string>& envs, const Testcase& testcase, bool skip_checker = false, bool keep_stdout = false, bool keep_stderr = false) {
+static j::object run_testcase(const string& etc_dir, const string& cache_dir, const string& code_path, const string& checker_code_path, const map<string, string>& envs, const Testcase& testcase, bool reuse_netns, bool skip_checker = false, bool keep_stdout = false, bool keep_stderr = false) {
   log_debug("run_testcase: %s", testcase.input_path.c_str());
 
   // assume user code and checker code are pre-compiled
@@ -2028,7 +2040,7 @@ static j::object run_testcase(const string& etc_dir, const string& cache_dir, co
     // should flock stdout_path, but since we use different tmp path, and it is scoped in pid dir. no more necessary
     // dest must be the same with dest used in compile_code
     string dest = get_code_work_dir(get_process_tmp_dir(cache_dir), code_path);
-    run_result = run_code(etc_dir, cache_dir, dest, code_path, testcase.runtime_limit, testcase.input_path, stdout_path, stderr_path, vector<string>() /* extra_lrun_args */, ENV_RUN /* env */);
+    run_result = run_code(etc_dir, cache_dir, dest, code_path, testcase.runtime_limit, reuse_netns, testcase.input_path, stdout_path, stderr_path, vector<string>() /* extra_lrun_args */, ENV_RUN /* env */);
 
     // write stdout, stderr
     if (keep_stdout) result["stdout"] = j::value(fs::nread(stdout_path, TRUNC_LOG));
@@ -2087,7 +2099,7 @@ static j::object run_testcase(const string& etc_dir, const string& cache_dir, co
       if (checker_code_path.empty()) {
         run_standard_checker(result, testcase, stdout_path);
       } else {
-        run_custom_checker(result, etc_dir, cache_dir, code_path, checker_code_path, envs, testcase, stdout_path);
+        run_custom_checker(result, etc_dir, cache_dir, code_path, checker_code_path, envs, testcase, stdout_path, reuse_netns);
       }
     }
   } while (false);
@@ -2113,7 +2125,7 @@ static j::value run_testcases(const Options& opts) {
       skipped_result["result"] = j::value(TestcaseResult::SKIPPED);
       results[i] = j::value(skipped_result);
     } else {
-      j::object testcase_result = run_testcase(opts.etc_dir, opts.cache_dir, opts.user_code_path, opts.checker_code_path, opts.envs, opts.cases[i], opts.skip_checker, opts.keep_stdout, opts.keep_stderr);
+      j::object testcase_result = run_testcase(opts.etc_dir, opts.cache_dir, opts.user_code_path, opts.checker_code_path, opts.envs, opts.cases[i], opts.reuse_netns, opts.skip_checker, opts.keep_stdout, opts.keep_stderr);
       results[i] = j::value(testcase_result);
       if (testcase_result["result"].to_str() != TestcaseResult::ACCEPTED) {
         should_skip = true;
@@ -2162,14 +2174,14 @@ int main(int argc, char const *argv[]) {
 
   { // precompile user code
     string dest = get_code_work_dir(get_process_tmp_dir(opts.cache_dir), opts.user_code_path);
-    CompileResult compile_result = compile_code(opts.etc_dir, opts.cache_dir, dest, opts.user_code_path, opts.compiler_limit);
+    CompileResult compile_result = compile_code(opts.etc_dir, opts.cache_dir, dest, opts.user_code_path, opts.compiler_limit, opts.reuse_netns);
     write_compile_result(jo, compile_result, "compilation");
     if (!compile_result.success) compiled = false;
   }
 
   if (compiled && !opts.checker_code_path.empty()) { // precompile checker code
     string dest = get_code_work_dir(fs::join(opts.cache_dir, SUBDIR_CHECKER), opts.checker_code_path);
-    CompileResult compile_result = compile_code(opts.etc_dir, opts.cache_dir, dest, opts.checker_code_path, opts.compiler_limit);
+    CompileResult compile_result = compile_code(opts.etc_dir, opts.cache_dir, dest, opts.checker_code_path, opts.compiler_limit, opts.reuse_netns);
     write_compile_result(jo, compile_result, "checkerCompilation");
     if (!compile_result.success) compiled = false;
     prepare_checker_mount_bind_files(dest);
