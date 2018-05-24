@@ -213,6 +213,7 @@ struct LrunArgs : public vector<string> {
     append("--basic-devices", "true");
     append("--remount-dev", "true");
     append("--network", "false");
+    append("--reuse-netns", "true");
     append("--chdir", "/tmp");
     append("--env", "ONLINE_JUDGE", "1");
     append("--env", "LANG", "en_US.UTF-8");
