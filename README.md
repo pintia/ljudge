@@ -105,7 +105,7 @@ A: Just write one and pass it to ljudge using `--checker-code`. Your checker's s
 * `"user_code"`: the source code provided using `--user-code`
 
 The checker's stdout will be captured. It should return 0 for ACCEPTED, 1 for WRONG\_ANSWER and 2 for PRESENTATION\_ERROR.  
-In order to be compatible with some old checkers, -1 (or 255 on most Unix systems) is WRONG\_ANSWER, too.
+To be compatible with some old checkers, -1 (or 255 on most Unix systems) is WRONG\_ANSWER too. But this is not suggested. 
 
 Notes
 -----
