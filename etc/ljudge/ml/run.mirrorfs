@@ -5,4 +5,4 @@ mirror /lib64/
 mirror /usr/lib*/
 mirror /etc/ld.so.cache
 mirror /opt/opam/
-mirror /usr/bin/ocamlc
+mirror /usr/bin/ocamlrun
