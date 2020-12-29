@@ -9,3 +9,4 @@ mirror /etc/ld.so.cache
 mirror /etc/alternatives/
 mirror /etc/java*/
 mirror /usr/bin/scala
+mirror /usr/share/scala/
