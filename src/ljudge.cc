@@ -2015,6 +2015,24 @@ static void prepare_inteactor_named_pipe(const string& dest) {
   mkfifo(fs::join(dest, "interactor_to_user").c_str(), 0666);
 }
 
+static LrunResult run_code_with_inteactor(
+    const string& etc_dir,
+    const string& cache_dir,
+    const string& dest,
+    const string& code_path,
+    const Limit& limit,
+    const string& interactor_path,
+    const Limit& interactor_limit,
+    const string& stdin_path,
+    const string& stdout_path,
+    const string& stderr_path = DEV_NULL,
+    const vector<string>& extra_lrun_args = vector<string>(),
+    const string& env = ENV_RUN,
+    const vector<string>& extra_argv = vector<string>()
+) {
+
+}
+
 static void run_custom_checker(j::object& result, const string& etc_dir, const string& cache_dir, const string& code_path, const string& checker_code_path, const map<string, string>& envs, const Testcase& testcase, const string& user_output_path) {
   log_debug("run_custom_checker: %s %s", testcase.output_path.c_str(), user_output_path.c_str());
 
