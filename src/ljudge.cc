@@ -2150,7 +2150,7 @@ static j::value run_testcases(const Options& opts) {
 
   vector<j::value> results;
   results.resize(opts.cases.size());
-  if (opts.total_time_limit > 0 || opt.skip_on_first_failure) {
+  if (opts.total_time_limit > 0 || opts.skip_on_first_failure) {
     double totalTime = 0;
     for (int i = 0; i < (int)opts.cases.size(); ++i) {
       j::object testcase_result = run_testcase(opts.etc_dir, opts.cache_dir, opts.user_code_path, opts.checker_code_path, opts.envs, opts.cases[i], opts.skip_checker, opts.keep_stdout, opts.keep_stderr);
