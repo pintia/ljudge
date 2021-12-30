@@ -2158,33 +2158,23 @@ static j::value run_testcases(const Options& opts) {
   }
 
   for (int i = 0; i < (int)opts.cases.size(); ++i) {
-    if (totalTime <= opts.total_time_limit) {
-      j::object testcase_result = run_testcase(opts.etc_dir, opts.cache_dir, opts.user_code_path, opts.checker_code_path, opts.envs, opts.cases[i], opts.skip_checker, opts.keep_stdout, opts.keep_stderr);
-      results[i] = j::value(testcase_result);
-      totalTime += testcase_result["time"];
-    } else {
+    if (totalTime > opts.total_time_limit) {
       j::object limit_exceeded_result;
       limit_exceeded_result["result"] = j::value(TestcaseResult::TOTAL_TIME_LIMIT_EXCEEDED);
       results[i] = j::value(limit_exceeded_result);
+    } else {
+      j::object testcase_result = run_testcase(opts.etc_dir, opts.cache_dir, opts.user_code_path, opts.checker_code_path, opts.envs, opts.cases[i], opts.skip_checker, opts.keep_stdout, opts.keep_stderr);
+      results[i] = j::value(testcase_result);
+      totalTime += testcase_result["time"];
     }
 
-    if (skip_on_first_failure) {
-      if (totalTime > opts.total_time_limit) {
-        j::object limit_exceeded_result;
-        limit_exceeded_result["result"] = j::value(TestcaseResult::TOTAL_TIME_LIMIT_EXCEEDED);
-        for (int j = i + 1; j < (int) opts.cases.size(); ++j) {
-          results[j] = j::value(limit_exceeded_result);
-        }
-        break;
+    if (skip_on_first_failure && testcase_result["result"].to_str() != TestcaseResult::ACCEPTED) {
+      j::object skipped_result;
+      skipped_result["result"] = j::value(TestcaseResult::SKIPPED);
+      for (int j = i + 1; j < (int) opts.cases.size(); ++j) {
+        results[j] = j::value(skipped_result);
       }
-      if (testcase_result["result"].to_str() != TestcaseResult::ACCEPTED) {
-        j::object skipped_result;
-        skipped_result["result"] = j::value(TestcaseResult::SKIPPED);
-        for (int j = i + 1; j < (int) opts.cases.size(); ++j) {
-          results[j] = j::value(skipped_result);
-        }
-        break;
-      }
+      break;
     }
   }
   return j::value(results);
