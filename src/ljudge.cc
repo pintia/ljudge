@@ -2150,31 +2150,36 @@ static j::value run_testcases(const Options& opts) {
 
   vector<j::value> results;
   results.resize(opts.cases.size());
-  double totalTime = 0;
-  if (!opts.skip_on_first_failure) {
+  if (opt.totol_time_limit > 0 || opt.skip_on_first_failure) {
+    double totalTime = 0;
+    for (int i = 0; i < (int)opts.cases.size(); ++i) {
+      j::object testcase_result = run_testcase(opts.etc_dir, opts.cache_dir, opts.user_code_path, opts.checker_code_path, opts.envs, opts.cases[i], opts.skip_checker, opts.keep_stdout, opts.keep_stderr);
+      results[i] = j::value(testcase_result);
+      totalTime += j::get<double>(testcase_result["time"]);
+
+      j::object skipped_result;
+      bool total_time_limit_exceed = opts.totol_time_limit> 0 && totalTime > opts.total_time_limit;
+      bool first_failure = opts.skip_on_first_failure && testcase_result["result"].to_str() != TestcaseResult::ACCEPTED;
+      if (total_time_limit_exceed) {
+        skipped_result["result"] = j::value(TestcaseResult::TOTAL_TIME_LIMIT_EXCEEDED);
+      }
+      if (first_failure) {
+        skipped_result["result"] = j::value(TestcaseResult::SKIPPED);
+      }
+      if (total_time_limit_exceed || first_failure) {
+        for (int j = i + 1; j < (int)opts.cases.size(); ++j) {
+          results[j] = j::value(skipped_result);
+        }
+        break;
+      }
+    }
+  } else {
 #ifdef _OPENMP
   #pragma omp parallel for if (opts.nthread != 1 && opts.cases.size() > 1)
 #endif
-  }
-
-  for (int i = 0; i < (int)opts.cases.size(); ++i) {
-    j::object testcase_result;
-    if (totalTime > opts.total_time_limit) {
-      testcase_result["result"] = j::value(TestcaseResult::TOTAL_TIME_LIMIT_EXCEEDED);
+    for (int i = 0; i < (int)opts.cases.size(); ++i) {
+      j::object testcase_result = run_testcase(opts.etc_dir, opts.cache_dir, opts.user_code_path, opts.checker_code_path, opts.envs, opts.cases[i], opts.skip_checker, opts.keep_stdout, opts.keep_stderr);
       results[i] = j::value(testcase_result);
-    } else {
-      testcase_result = run_testcase(opts.etc_dir, opts.cache_dir, opts.user_code_path, opts.checker_code_path, opts.envs, opts.cases[i], opts.skip_checker, opts.keep_stdout, opts.keep_stderr);
-      results[i] = j::value(testcase_result);
-      totalTime += testcase_result["time"].get(double);
-    }
-
-    if (opts.skip_on_first_failure && testcase_result["result"].to_str() != TestcaseResult::ACCEPTED) {
-      j::object skipped_result;
-      skipped_result["result"] = j::value(TestcaseResult::SKIPPED);
-      for (int j = i + 1; j < (int) opts.cases.size(); ++j) {
-        results[j] = j::value(skipped_result);
-      }
-      break;
     }
   }
   return j::value(results);
