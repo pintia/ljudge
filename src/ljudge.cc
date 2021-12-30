@@ -2175,7 +2175,7 @@ static j::value run_testcases(const Options& opts) {
     }
   } else {
 #ifdef _OPENMP
-  #pragma omp parallel for if (opts.nthread != 1 && opts.cases.size() > 1)
+    #pragma omp parallel for if (opts.nthread != 1 && opts.cases.size() > 1)
 #endif
     for (int i = 0; i < (int)opts.cases.size(); ++i) {
       j::object testcase_result = run_testcase(opts.etc_dir, opts.cache_dir, opts.user_code_path, opts.checker_code_path, opts.envs, opts.cases[i], opts.skip_checker, opts.keep_stdout, opts.keep_stderr);
