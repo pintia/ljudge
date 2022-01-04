@@ -722,6 +722,7 @@ static void print_usage() {
       "         [--threads n]\n"
 #endif
       "         [--skip-on-first-failure]\n"
+      "         [--total-time-limit seconds]\n"
       "         [--max-cpu-time seconds] [--max-real-time seconds]\n"
       "         [--max-memory bytes] [--max-output bytes] [--max-stack bytes]\n"
       "         [--max-checker-cpu-time seconds] [--max-checker-real-time seconds]\n"
@@ -1437,6 +1438,9 @@ static Options parse_cli_options(int argc, const char *argv[]) {
       }
       options.nthread = 1;
       options.skip_on_first_failure = true;
+    } else if (option == "total-time-limit") {
+      REQUIRE_NARGV(1);
+      options.total_time_limit = NEXT_NUMBER_ARG;
     } else {
       fatal("'%s' is not a valid option", argv[i]);
     }
