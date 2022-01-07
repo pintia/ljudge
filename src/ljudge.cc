@@ -1268,6 +1268,7 @@ static Options parse_cli_options(int argc, const char *argv[]) {
     options.direct_mode = false;
     options.nthread = 0;
     options.skip_on_first_failure = false;
+    options.total_time_limit = -1.0;
     current_case.checker_limit = { 5, 10, 1 << 30, 1 << 30, 1 << 30 };
     current_case.runtime_limit = { 1, 3, 1 << 26 /* 64M mem */, 1 << 25 /* 32M output */, 1 << 23 /* 8M stack limit */ };
     debug_level = getenv("DEBUG") ? 10 : 0;
@@ -2162,7 +2163,7 @@ static j::value run_testcases(const Options& opts) {
       totalTime += testcase_result["time"].get<double>();
 
       j::object skipped_result;
-      bool total_time_limit_exceed = opts.total_time_limit> 0 && totalTime > opts.total_time_limit;
+      bool total_time_limit_exceed = opts.total_time_limit > 0 && totalTime > opts.total_time_limit;
       bool first_failure = opts.skip_on_first_failure && testcase_result["result"].to_str() != TestcaseResult::ACCEPTED;
       if (total_time_limit_exceed) {
         skipped_result["result"] = j::value(TestcaseResult::TOTAL_TIME_LIMIT_EXCEEDED);
