@@ -2093,6 +2093,10 @@ static j::object run_testcase(const string& etc_dir, const string& cache_dir, co
       break;
     }
 
+    // write memory, cpu_time
+    result["time"] = j::value(run_result.cpu_time);
+    result["memory"] = j::value((double)run_result.memory);
+
     // check limits
     if (!run_result.exceed.empty()) {
       const string& exceed = run_result.exceed;
@@ -2106,10 +2110,6 @@ static j::object run_testcase(const string& etc_dir, const string& cache_dir, co
       result["exceed"] = j::value(exceed);
       break;
     }
-
-    // write memory, cpu_time
-    result["time"] = j::value(run_result.cpu_time);
-    result["memory"] = j::value((double)run_result.memory);
 
     // check signaled and exit code
     if (run_result.signaled) {
@@ -2160,7 +2160,9 @@ static j::value run_testcases(const Options& opts) {
     for (int i = 0; i < (int)opts.cases.size(); ++i) {
       j::object testcase_result = run_testcase(opts.etc_dir, opts.cache_dir, opts.user_code_path, opts.checker_code_path, opts.envs, opts.cases[i], opts.skip_checker, opts.keep_stdout, opts.keep_stderr);
       results[i] = j::value(testcase_result);
-      totalTime += testcase_result["time"].get<double>();
+      if (!testcase_result["time"].is<j::null>()) {
+        totalTime += testcase_result["time"].get<double>();
+      }
 
       j::object skipped_result;
       bool total_time_limit_exceed = opts.total_time_limit > 0 && totalTime > opts.total_time_limit;
