@@ -9,3 +9,5 @@ mirror /etc/alternatives/
 # required by python
 touch /etc/passwd
 mirror /usr/bin/pypy{,2*,3*}
+# required by pypy
+mirror /proc/cpuinfo
