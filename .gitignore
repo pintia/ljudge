@@ -2,3 +2,4 @@
 /src/ljudge
 node_modules
 *.log
+.idea

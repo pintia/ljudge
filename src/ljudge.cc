@@ -148,6 +148,7 @@ struct Options {
   int nthread;  // how many testcases can run in parallel. default is decided by omp (cpu cores
   bool skip_on_first_failure;  // skip test cases after first failure occured
   double total_time_limit;  // seconds
+  bool ignore_presentation_error;
 };
 
 struct LrunArgs : public vector<string> {
@@ -1268,6 +1269,7 @@ static Options parse_cli_options(int argc, const char *argv[]) {
     options.direct_mode = false;
     options.nthread = 0;
     options.skip_on_first_failure = false;
+    options.ignore_presentation_error = false;
     options.total_time_limit = -1.0;
     current_case.checker_limit = { 5, 10, 1 << 30, 1 << 30, 1 << 30 };
     current_case.runtime_limit = { 1, 3, 1 << 26 /* 64M mem */, 1 << 25 /* 32M output */, 1 << 23 /* 8M stack limit */ };
@@ -2188,6 +2190,18 @@ static j::value run_testcases(const Options& opts) {
       j::object testcase_result = run_testcase(opts.etc_dir, opts.cache_dir, opts.user_code_path, opts.checker_code_path, opts.envs, opts.cases[i], opts.skip_checker, opts.keep_stdout, opts.keep_stderr);
       results[i] = j::value(testcase_result);
     }
+  }
+
+  if(opts.ignore_presentation_error && testcase_result["result"] == 'PRESENTATION_ERROR'){
+     for (int i = 0; i < (int)opts.cases.size(); ++i) {
+        j::object testcase_result = run_testcase(opts.etc_dir, opts.cache_dir, opts.user_code_path, opts.checker_code_path, opts.envs, opts.cases[i], opts.skip_checker, opts.keep_stdout, opts.keep_stderr);
+        results[i] = j::value(testcase_result);
+        j::object ignore_presentation_error_result;
+        ignore_presentation_error_result["result"] = j::value(TestcaseResult::ACCEPTED);
+        for (int j = i + 1; j < (int)opts.cases.size(); ++j) {
+            results[j] = j::value(ignore_presentation_error_result);
+        }
+     }
   }
   return j::value(results);
 }
