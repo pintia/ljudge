@@ -723,6 +723,7 @@ static void print_usage() {
       "         [--threads n]\n"
 #endif
       "         [--skip-on-first-failure]\n"
+      "         [--ignore-presentation-error]\n"
       "         [--total-time-limit seconds]\n"
       "         [--max-cpu-time seconds] [--max-real-time seconds]\n"
       "         [--max-memory bytes] [--max-output bytes] [--max-stack bytes]\n"
@@ -1441,6 +1442,8 @@ static Options parse_cli_options(int argc, const char *argv[]) {
       }
       options.nthread = 1;
       options.skip_on_first_failure = true;
+    } else if (option == "ignore-presentation-error") {
+      options.ignore_presentation_error = true;
     } else if (option == "total-time-limit") {
       REQUIRE_NARGV(1);
       options.total_time_limit = NEXT_NUMBER_ARG;
