@@ -2146,7 +2146,7 @@ static j::object run_testcase(const string& etc_dir, const string& cache_dir, co
     }
 
     // check ignore presentation error
-    if(opts.ignore_presentation_error && result["result"] == 'PRESENTATION_ERROR'){
+    if(ignore_presentation_error && result["result"] ==  j::value(TestcaseResult::PRESENTATION_ERROR)){
         result["result"] = j::value(TestcaseResult::ACCEPTED);
     }
   } while (false);
