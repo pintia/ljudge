@@ -2196,7 +2196,6 @@ static j::value run_testcases(const Options& opts) {
       results[i] = j::value(testcase_result);
     }
   }
-
   return j::value(results);
 }
 
