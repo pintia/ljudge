@@ -1,7 +1,7 @@
 #ifndef _GNU_SOURCE
 # define _GNU_SOURCE
 #endif
-
+#include <iostream>
 #include <cerrno>
 #include <cstdint>
 #include <cstdio>
@@ -1670,6 +1670,7 @@ static vector<LrunResult> batch_lrun(
     }
   }
 #endif
+  // pause();
   vector<pid_t> pids(params.size());
   for (uint i = 0; i < params.size(); i++) {
     pid_t pid = fork();
@@ -1810,7 +1811,6 @@ static LrunResult lrun(
     log_debug("lrun stderr redirects to %s", stderr_path.c_str());
   }
 #endif
-
   pid_t pid = fork();
   if (pid == -1) {
     log_debug("failed to fork\n");
@@ -2164,9 +2164,10 @@ static void prepare_checker_mount_bind_files(const string& dest) {
 }
 
 static void prepare_inteactor_named_pipe(const string& dest) {
-  fatal(dest.c_str());
-  mkfifo(fs::join(dest, "user2interactor").c_str(), 0666);
-  mkfifo(fs::join(dest, "interactor2user").c_str(), 0666);
+  std::cout << "here" << std::endl << std::flush;
+  std::cout << dest << std::endl << std::flush;
+  mkfifo(fs::join(dest, "tmp", "user2interactor").c_str(), 0666);
+  mkfifo(fs::join(dest, "tmp", "interactor2user").c_str(), 0666);
 }
 
 static LrunResult run_code_with_inteactor(
@@ -2175,6 +2176,7 @@ static LrunResult run_code_with_inteactor(
     const string& dest,
     const string& code_path,
     const Limit& limit,
+    const string& interactor_dest,
     const string& interactor_path,
     const Limit& interactor_limit,
     const Testcase& testcase,
@@ -2229,7 +2231,7 @@ static LrunResult run_code_with_inteactor(
   {
     // not locking here because the directory is read-only
     // fs::ScopedFileLock lock(dest);
-    std::list<string> run_cmd = get_config_list(etc_dir, code_path, ENV_RUN EXT_CMD_LIST);
+    std::list<string> run_cmd = get_config_list(etc_dir, interactor_path, ENV_RUN EXT_CMD_LIST);
     if (run_cmd.empty()) {
       // use exe name as fallback
       run_cmd.push_back("./" + interactor_exe_name);
@@ -2237,22 +2239,25 @@ static LrunResult run_code_with_inteactor(
 
     vector<string> interactor_argv;
     interactor_argv.push_back(testcase.input_path);
-    interactor_argv.push_back(stdout_path);
+    interactor_argv.push_back("stdout");
     interactor_argv.push_back(testcase.output_path);
 
-    string src_name = get_src_name(etc_dir, code_path);
-    map<string, string> mappings = get_mappings(src_name, interactor_exe_name, dest);
+    string src_name = get_src_name(etc_dir, interactor_path);
+    map<string, string> mappings = get_mappings(src_name, interactor_exe_name, interactor_dest);
     mappings["$chroot"] = interactor_chroot_path;
 
     LrunArgs lrun_args;
     lrun_args.append_default();
     lrun_args.append("--chroot", interactor_chroot_path);
-    lrun_args.append("--bindfs-ro", fs::join(interactor_chroot_path, "/tmp"), dest);
-    lrun_args.append(get_override_lrun_args(etc_dir, cache_dir, code_path, ENV_RUN, interactor_chroot_path, run_cmd.size() >= 2 ? (*run_cmd.begin()) : "" ));
+    lrun_args.append("--bindfs-ro", fs::join(interactor_chroot_path, "/tmp"), interactor_dest);
+    lrun_args.append("--bindfs-ro", fs::join(interactor_chroot_path, "/tmp", testcase.input_path), testcase.input_path);
+    lrun_args.append("--bindfs", fs::join(interactor_chroot_path, "/tmp", "stdout"), stdout_path);
+    lrun_args.append("--bindfs-ro", fs::join(interactor_chroot_path, "/tmp", testcase.output_path), testcase.output_path);
+    lrun_args.append(get_override_lrun_args(etc_dir, cache_dir, interactor_path, ENV_RUN, interactor_chroot_path, run_cmd.size() >= 2 ? (*run_cmd.begin()) : "" ));
     lrun_args.append(limit);
     lrun_args.append(escape_list(extra_lrun_args, mappings));
-    lrun_args.append(filter_user_lrun_args(escape_list(get_config_list(etc_dir, code_path, format("%s%s", env, EXT_LRUN_ARGS)), mappings), cache_dir));
-    lrun_args.append(filter_user_lrun_args(escape_list(get_config_list(etc_dir, code_path, ENV_EXTRA EXT_LRUN_ARGS), mappings), cache_dir));
+    lrun_args.append(filter_user_lrun_args(escape_list(get_config_list(etc_dir, interactor_path, format("%s%s", env, EXT_LRUN_ARGS)), mappings), cache_dir));
+    lrun_args.append(filter_user_lrun_args(escape_list(get_config_list(etc_dir, interactor_path, ENV_EXTRA EXT_LRUN_ARGS), mappings), cache_dir));
     lrun_args.append("--");
     lrun_args.append(escape_list(run_cmd, mappings));
     lrun_args.append(escape_list(interactor_argv, mappings));
@@ -2352,8 +2357,9 @@ static j::object run_testcase(const string& etc_dir, const string& cache_dir, co
     if(interactor_code_path.empty()) {
       run_result = run_code(etc_dir, cache_dir, dest, code_path, testcase.runtime_limit, testcase.input_path, stdout_path, stderr_path, vector<string>() /* extra_lrun_args */, ENV_RUN /* env */);
     } else {
+      string interactor_dest = get_code_work_dir(fs::join(cache_dir, SUBDIR_INTERACTOR), interactor_code_path);
       // run with interactor
-      run_result = run_code_with_inteactor(etc_dir, cache_dir, dest, code_path, testcase.runtime_limit, interactor_code_path, testcase.interactor_limit, testcase, testcase.input_path, stdout_path, stderr_path, vector<string>() /* extra_lrun_args */, ENV_RUN /* env */);
+      run_result = run_code_with_inteactor(etc_dir, cache_dir, dest, code_path, testcase.runtime_limit, interactor_dest, interactor_code_path, testcase.interactor_limit, testcase, testcase.input_path, stdout_path, stderr_path, vector<string>() /* extra_lrun_args */, ENV_RUN /* env */);
     }
 
     // write stdout, stderr
@@ -2522,7 +2528,6 @@ int main(int argc, char const *argv[]) {
     if (!compile_result.success) compiled = false;
     prepare_inteactor_named_pipe(dest);
   }
-
   if (compiled && !opts.checker_code_path.empty()) { // precompile checker code
     string dest = get_code_work_dir(fs::join(opts.cache_dir, SUBDIR_CHECKER), opts.checker_code_path);
     CompileResult compile_result = compile_code(opts.etc_dir, opts.cache_dir, dest, opts.checker_code_path, opts.compiler_limit);
