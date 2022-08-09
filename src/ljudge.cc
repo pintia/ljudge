@@ -705,7 +705,8 @@ static void print_usage() {
   fprintf(stderr,
       "Compile, run, judge and print response JSON:\n"
       "  ljudge --user-code (or -u) user-code-path\n"
-      "         [--checker-code (or -c) checker-code-path\n"
+      "         [--checker-code] (or -c) checker-code-path\n"
+      "         [--interactor-code] (or -a) interactor-code-path\n"
       "         [--testcase] --input (or -i) input-path --output (or -o) output-path\n"
       "         (or: --input input-path --output-sha1 ac-chomp-sha1,pe-sha1)\n"
       "         [--user-stdout path] [--user-stderr path]\n"
@@ -1317,7 +1318,7 @@ static Options parse_cli_options(int argc, const char *argv[]) {
     } else if (option == "checker-code" || option == "c") {
       REQUIRE_NARGV(1);
       options.checker_code_path = NEXT_STRING_ARG;
-    } else if (option == "interactor-code") {
+    } else if (option == "interactor-code" || option == "a") {
       REQUIRE_NARGV(1);
       options.interactor_code_path = NEXT_STRING_ARG;
     } else if (option == "testcase") {
@@ -1621,6 +1622,158 @@ static void prepare_crash_report_path() {
   setenv("SEGFAULT_USE_ALTSTACK", "1", 1 /* overwrite */);
 }
 #endif
+
+struct LrunParams {
+  vector<string> args;
+  string stdin_path;
+  string stdout_path;
+  string stderr_path;
+};
+
+static vector<LrunResult> batch_lrun(
+    const vector<LrunParams>& params
+) {
+  vector<int *> pipes(params.size());
+  vector<LrunResult> results(params.size());
+  for (uint i = 0; i < params.size(); i++) {
+    pipes[i] = new int[2];
+    results[i] = LrunResult();
+    int ret = pipe(pipes[i]);
+    if (ret != 0) fatal("can not create pipe to run lrun");
+  }
+#ifndef NDEBUG
+  for (uint i = 0; i < params.size(); i++) {
+    vector<string> args = params[i].args;
+    string stdin_path = params[i].stdin_path;
+    string stdout_path = params[i].stdout_path;
+    string stderr_path = params[i].stderr_path;
+    if (getenv("LJUDGE_SET_LRUN_SEGFAULT_PATH")) {
+      prepare_crash_report_path();
+    }
+    string debug_lrun_command = "lrun";
+    for (__typeof(args.begin()) it = args.begin(); it != args.end(); ++it) {
+        debug_lrun_command += " " + shell_escape(*it);
+    }
+    if (!stdin_path.empty()) debug_lrun_command += " <" + shell_escape(stdin_path);
+    if (!stdout_path.empty()) debug_lrun_command += " >" + shell_escape(stdout_path);
+    if (!stderr_path.empty()) {
+      if (stderr_path == stdout_path)
+        debug_lrun_command += " 2>&1";
+      else
+        debug_lrun_command += " 2>" + shell_escape(stderr_path);
+    }
+    log_debug("running: %s", debug_lrun_command.c_str());
+    fflush(stderr);
+    if (getenv("LJUDGE_KEEP_LRUN_STDERR") && stderr_path == DEV_NULL) {
+      stderr_path = format("/tmp/ljudge_lrun.%s.log", get_random_hash(6));
+      log_debug("lrun stderr redirects to %s", stderr_path.c_str());
+    }
+  }
+#endif
+  vector<pid_t> pids(params.size());
+  for (uint i = 0; i < params.size(); i++) {
+    pid_t pid = fork();
+    pids[i] = pid;
+    if (pid == -1) {
+      log_debug("failed to fork\n");
+      results[i].error = "cannot fork to run lrun";
+    }
+    if (0 == pid) {
+      vector<string> args = params[i].args;
+      string stdin_path = params[i].stdin_path;
+      string stdout_path = params[i].stdout_path;
+      string stderr_path = params[i].stderr_path;
+      prctl(PR_SET_PDEATHSIG, SIGTERM);
+      close(pipes[i][0]);
+      // pass lrun's fd (3) output
+      static const int LRUN_FILENO = 3;
+      setfd(LRUN_FILENO, pipes[i][1]);
+      // prepare fds
+      if (!stdin_path.empty()) {
+        fclose(stdin);
+        int ret = open(stdin_path.c_str(), O_RDONLY);
+        if (ret < 0) fatal("can not open %s for reading", stdin_path.c_str());
+        setfd(STDIN_FILENO, ret);
+      }
+      if (!stderr_path.empty()) {
+        fclose(stderr);
+        int ret = open(stderr_path.c_str(), O_WRONLY | O_TRUNC | O_CREAT, 0600);
+        if (ret < 0) fatal("can not open %s for writing", stderr_path.c_str());
+        setfd(STDERR_FILENO, ret);
+      }
+      if (!stdout_path.empty()) {
+        fclose(stdout);
+        if (stderr_path == stdout_path) {
+          dup2(STDERR_FILENO, STDOUT_FILENO);
+        } else {
+          int ret = open(stdout_path.c_str(), O_WRONLY | O_TRUNC | O_CREAT, 0600);
+          if (ret < 0) fatal("can not open %s for writing", stdout_path.c_str());
+          setfd(STDOUT_FILENO, ret);
+        }
+      }
+      // prepare args
+      const char **argv = (const char**)malloc(sizeof(char*) * (args.size() + 2));
+      argv[0] = "lrun";
+      for (int i = 0; i < (int)args.size(); ++i) {
+        argv[i + 1] = args[i].c_str();
+      }
+      argv[args.size() + 1] = 0;
+      execvp("lrun", (char * const *) argv);
+      close(pipes[i][1]);
+      log_error("can not start lrun");
+      // not using cleanup_exit here because it is the child
+      exit(1);
+    }
+  }
+  for (uint i = 0; i < params.size(); i++) {
+    if (pids[i] == -1) {
+      continue;
+    }
+    close(pipes[i][1]);
+
+    int status = 0;
+    string lrun_output = "";
+
+    while (true) {
+      char ch;
+      ssize_t read_size = read(pipes[i][0], &ch, 1);
+      if (read_size == 1) {
+        lrun_output += ch;
+        if (ch == '\n' && lrun_output.find("EXCEED  ") != string::npos) {
+          // we receive enough content (EXCEED ... "\n" is the last line)
+          // lrun's exiting may take 0.03+ seconds (mostly the kernel
+          // cleaning up the pid and ipc namespace). do NOT wait for it.
+          //
+          // lrun ignores SIGPIPE so this won't hurt it.
+          //
+          // we will soon exit (after all testcases) so zombies will be
+          // killed by init.
+          //
+          // this reduces 0.03 to 0.04s per lrun run. when running
+          // examples/a-plus-b/run.sh, real time decreases from 14.27
+          // to 13.29, about 7%.
+          results[i] = parse_lrun_output(lrun_output);
+          break;
+        }
+      } else {
+        // EOF or error. get lrun exit status
+        while (waitpid(pids[i], &status, 0) != pids[i]) usleep(10000);
+        if (status && WIFSIGNALED(status)) {
+          results[i].error = format("lrun was signaled (%d)", WTERMSIG(status));
+        } else if (status && WEXITSTATUS(status) != 0) {
+          results[i].error = format("lrun exited with non-zero (%d)", WEXITSTATUS(status));
+        } else {
+          results[i].error = format("lrun did not generate expected output");
+        }
+        break;
+      }
+    }
+    close(pipes[i][0]);
+    delete[] pipes[i];
+    log_debug("lrun output:\n%s", lrun_output.c_str());
+  }
+  return results;
+}
 
 static LrunResult lrun(
 #ifdef NDEBUG
@@ -2011,8 +2164,9 @@ static void prepare_checker_mount_bind_files(const string& dest) {
 }
 
 static void prepare_inteactor_named_pipe(const string& dest) {
-  mkfifo(fs::join(dest, "user_to_interactor").c_str(), 0666);
-  mkfifo(fs::join(dest, "interactor_to_user").c_str(), 0666);
+  fatal(dest.c_str());
+  mkfifo(fs::join(dest, "user2interactor").c_str(), 0666);
+  mkfifo(fs::join(dest, "interactor2user").c_str(), 0666);
 }
 
 static LrunResult run_code_with_inteactor(
@@ -2023,14 +2177,94 @@ static LrunResult run_code_with_inteactor(
     const Limit& limit,
     const string& interactor_path,
     const Limit& interactor_limit,
-    const string& stdin_path,
+    const Testcase& testcase,
+    const string& stdin_path, // no use?
     const string& stdout_path,
     const string& stderr_path = DEV_NULL,
     const vector<string>& extra_lrun_args = vector<string>(),
     const string& env = ENV_RUN,
     const vector<string>& extra_argv = vector<string>()
 ) {
+  log_debug("run_code_with_interactor: %s", code_path.c_str());
 
+  vector<LrunParams> params;
+
+  string user_chroot_path = prepare_chroot(etc_dir, code_path, env);
+  string user_exe_name = get_config_content(etc_dir, code_path, ENV_COMPILE EXT_EXE_NAME, DEFAULT_EXE_NAME);
+
+  {
+    // not locking here because the directory is read-only
+    // fs::ScopedFileLock lock(dest);
+    std::list<string> run_cmd = get_config_list(etc_dir, code_path, ENV_RUN EXT_CMD_LIST);
+    if (run_cmd.empty()) {
+      // use exe name as fallback
+      run_cmd.push_back("./" + user_exe_name);
+    }
+
+    string src_name = get_src_name(etc_dir, code_path);
+    map<string, string> mappings = get_mappings(src_name, user_exe_name, dest);
+    mappings["$chroot"] = user_chroot_path;
+
+    LrunArgs lrun_args;
+    lrun_args.append_default();
+    lrun_args.append("--chroot", user_chroot_path);
+    lrun_args.append("--bindfs-ro", fs::join(user_chroot_path, "/tmp"), dest);
+    lrun_args.append(get_override_lrun_args(etc_dir, cache_dir, code_path, ENV_RUN, user_chroot_path, run_cmd.size() >= 2 ? (*run_cmd.begin()) : "" ));
+    lrun_args.append(limit);
+    lrun_args.append(escape_list(extra_lrun_args, mappings));
+    lrun_args.append(filter_user_lrun_args(escape_list(get_config_list(etc_dir, code_path, format("%s%s", env, EXT_LRUN_ARGS)), mappings), cache_dir));
+    lrun_args.append(filter_user_lrun_args(escape_list(get_config_list(etc_dir, code_path, ENV_EXTRA EXT_LRUN_ARGS), mappings), cache_dir));
+    lrun_args.append("--");
+    lrun_args.append(escape_list(run_cmd, mappings));
+    lrun_args.append(escape_list(extra_argv, mappings));
+
+    // LrunResult user_run_result = lrun(lrun_args, "interactor2user", "user2interactor", stderr_path);
+    LrunParams user_p = LrunParams{lrun_args, "interactor2user", "user2interactor", stderr_path};
+    params.push_back(user_p);
+  }
+
+  string interactor_chroot_path = prepare_chroot(etc_dir, interactor_path, env);
+  string interactor_exe_name = get_config_content(etc_dir, interactor_path, ENV_COMPILE EXT_EXE_NAME, DEFAULT_EXE_NAME);
+
+  {
+    // not locking here because the directory is read-only
+    // fs::ScopedFileLock lock(dest);
+    std::list<string> run_cmd = get_config_list(etc_dir, code_path, ENV_RUN EXT_CMD_LIST);
+    if (run_cmd.empty()) {
+      // use exe name as fallback
+      run_cmd.push_back("./" + interactor_exe_name);
+    }
+
+    vector<string> interactor_argv;
+    interactor_argv.push_back(testcase.input_path);
+    interactor_argv.push_back(stdout_path);
+    interactor_argv.push_back(testcase.output_path);
+
+    string src_name = get_src_name(etc_dir, code_path);
+    map<string, string> mappings = get_mappings(src_name, interactor_exe_name, dest);
+    mappings["$chroot"] = interactor_chroot_path;
+
+    LrunArgs lrun_args;
+    lrun_args.append_default();
+    lrun_args.append("--chroot", interactor_chroot_path);
+    lrun_args.append("--bindfs-ro", fs::join(interactor_chroot_path, "/tmp"), dest);
+    lrun_args.append(get_override_lrun_args(etc_dir, cache_dir, code_path, ENV_RUN, interactor_chroot_path, run_cmd.size() >= 2 ? (*run_cmd.begin()) : "" ));
+    lrun_args.append(limit);
+    lrun_args.append(escape_list(extra_lrun_args, mappings));
+    lrun_args.append(filter_user_lrun_args(escape_list(get_config_list(etc_dir, code_path, format("%s%s", env, EXT_LRUN_ARGS)), mappings), cache_dir));
+    lrun_args.append(filter_user_lrun_args(escape_list(get_config_list(etc_dir, code_path, ENV_EXTRA EXT_LRUN_ARGS), mappings), cache_dir));
+    lrun_args.append("--");
+    lrun_args.append(escape_list(run_cmd, mappings));
+    lrun_args.append(escape_list(interactor_argv, mappings));
+    lrun_args.append(escape_list(extra_argv, mappings));
+
+    // LrunResult ineractor_run_result = lrun(lrun_args, "user2interactor", "interactor2user", stderr_path);
+    LrunParams interactor_p = LrunParams{lrun_args, "user2interactor", "interactor2user", stderr_path};
+    params.push_back(interactor_p);
+  }
+
+  vector<LrunResult> run_result = batch_lrun(params);
+  return run_result[0];
 }
 
 static void run_custom_checker(j::object& result, const string& etc_dir, const string& cache_dir, const string& code_path, const string& checker_code_path, const map<string, string>& envs, const Testcase& testcase, const string& user_output_path) {
@@ -2119,7 +2353,7 @@ static j::object run_testcase(const string& etc_dir, const string& cache_dir, co
       run_result = run_code(etc_dir, cache_dir, dest, code_path, testcase.runtime_limit, testcase.input_path, stdout_path, stderr_path, vector<string>() /* extra_lrun_args */, ENV_RUN /* env */);
     } else {
       // run with interactor
-      run_result = run_code_with_inteactor(etc_dir, cache_dir, dest, code_path, testcase.runtime_limit, interactor_code_path, testcase.interactor_limit, testcase.input_path, stdout_path, stderr_path, vector<string>() /* extra_lrun_args */, ENV_RUN /* env */);
+      run_result = run_code_with_inteactor(etc_dir, cache_dir, dest, code_path, testcase.runtime_limit, interactor_code_path, testcase.interactor_limit, testcase, testcase.input_path, stdout_path, stderr_path, vector<string>() /* extra_lrun_args */, ENV_RUN /* env */);
     }
 
     // write stdout, stderr
