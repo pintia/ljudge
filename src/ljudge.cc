@@ -1,7 +1,7 @@
 #ifndef _GNU_SOURCE
 # define _GNU_SOURCE
 #endif
-#include <iostream>
+
 #include <cerrno>
 #include <cstdint>
 #include <cstdio>
@@ -254,7 +254,8 @@ protected:
     if (has_lrun_empty_netns()) return true;
     if (!fs::exists("/dev/shm/ljudge-netns-attempted")) {
       log_debug("running 'lrun-netns-empty create' to create empty netns");
-      system("lrun-netns-empty create 1>" DEV_NULL " 2>" DEV_NULL);
+      int ret = system("lrun-netns-empty create 1>" DEV_NULL " 2>" DEV_NULL);
+      if (ret != 0) log_debug("run 'lrun-netns-empty create' failed");
       fs::touch("/dev/shm/ljudge-netns-attempted");
       return has_lrun_empty_netns();
     } else {
@@ -735,6 +736,8 @@ static void print_usage() {
       "         [--max-checker-memory bytes] [--max-checker-output bytes]\n"
       "         [--max-compiler-cpu-time seconds] [--max-compiler-real-time seconds]\n"
       "         [--max-compiler-memory bytes] [--max-compiler-output bytes]\n"
+      "         [--max-interactor-cpu-time seconds] [--max-interactor-real-time seconds]\n"
+      "         [--max-interactor-memory bytes] [--max-interactor-output bytes]\n"
       "         [--env name value] [--env name value] ...\n"
       "\n"
       "Check environment:\n"
@@ -1321,6 +1324,7 @@ static Options parse_cli_options(int argc, const char *argv[]) {
     } else if (option == "interactor-code" || option == "a") {
       REQUIRE_NARGV(1);
       options.interactor_code_path = NEXT_STRING_ARG;
+
     } else if (option == "testcase") {
       APPEND_TEST_CASE;
     } else if (option == "env") {
@@ -1406,6 +1410,18 @@ static Options parse_cli_options(int argc, const char *argv[]) {
     } else if (option == "max-checker-memory") {
       REQUIRE_NARGV(1);
       current_case.checker_limit.memory = parse_bytes(NEXT_STRING_ARG);
+    } else if (option == "max-interactor-cpu-time") {
+      REQUIRE_NARGV(1);
+      current_case.interactor_limit.cpu_time = NEXT_NUMBER_ARG;
+    } else if (option == "max-interactor-real-time") {
+      REQUIRE_NARGV(1);
+      current_case.interactor_limit.real_time = NEXT_NUMBER_ARG;
+    } else if (option == "max-interactor-output") {
+      REQUIRE_NARGV(1);
+      current_case.interactor_limit.output = parse_bytes(NEXT_STRING_ARG);
+    } else if (option == "max-interactor-memory") {
+      REQUIRE_NARGV(1);
+      current_case.interactor_limit.memory = parse_bytes(NEXT_STRING_ARG);
     /* [[[end]]] */
     } else if (option == "etc-dir") {
       REQUIRE_NARGV(1);
@@ -1446,7 +1462,7 @@ static Options parse_cli_options(int argc, const char *argv[]) {
 #endif
     } else if (option == "skip-on-first-failure") {
       if (options.nthread > 1) {
-        fatal("'skip-on-first-faiulure' does not work with threads")
+        fatal("'skip-on-first-faiulure' does not work with threads");
       }
       options.nthread = 1;
       options.skip_on_first_failure = true;
@@ -1692,8 +1708,12 @@ static vector<LrunResult> batch_lrun(
       // prepare fds
       if (!stdin_path.empty()) {
         fclose(stdin);
-        int ret = open(stdin_path.c_str(), O_RDONLY);
+        int ret = open(stdin_path.c_str(), O_RDONLY | O_NONBLOCK);
         if (ret < 0) fatal("can not open %s for reading", stdin_path.c_str());
+        // reset to blocking
+        int opts = fcntl(ret, F_GETFL);
+        opts = opts & (~O_NONBLOCK);
+        fcntl(ret, F_SETFL, opts);
         setfd(STDIN_FILENO, ret);
       }
       if (!stderr_path.empty()) {
@@ -1810,6 +1830,7 @@ static LrunResult lrun(
     stderr_path = format("/tmp/ljudge_lrun.%s.log", get_random_hash(6));
     log_debug("lrun stderr redirects to %s", stderr_path.c_str());
   }
+  
 #endif
   pid_t pid = fork();
   if (pid == -1) {
@@ -2163,14 +2184,13 @@ static void prepare_checker_mount_bind_files(const string& dest) {
   fs::touch(fs::join(dest, "user_code"));
 }
 
-static void prepare_inteactor_named_pipe(const string& dest) {
-  std::cout << "here" << std::endl << std::flush;
-  std::cout << dest << std::endl << std::flush;
-  mkfifo(fs::join(dest, "tmp", "user2interactor").c_str(), 0666);
-  mkfifo(fs::join(dest, "tmp", "interactor2user").c_str(), 0666);
+static void prepare_inteactor_bind_files(const string& dest) {
+  fs::touch(fs::join(dest, "input"));
+  fs::touch(fs::join(dest, "output"));
+  fs::touch(fs::join(dest, "answer"));
 }
 
-static LrunResult run_code_with_inteactor(
+static std::pair<LrunResult, LrunResult> run_code_with_inteactor(
     const string& etc_dir,
     const string& cache_dir,
     const string& dest,
@@ -2194,6 +2214,9 @@ static LrunResult run_code_with_inteactor(
   string user_chroot_path = prepare_chroot(etc_dir, code_path, env);
   string user_exe_name = get_config_content(etc_dir, code_path, ENV_COMPILE EXT_EXE_NAME, DEFAULT_EXE_NAME);
 
+  string i2u_pipe = fs::join(cache_dir, format("%s-%s", "i2u", get_random_hash()));
+  string u2i_pipe = fs::join(cache_dir, format("%s-%s", "i2u", get_random_hash()));
+
   {
     // not locking here because the directory is read-only
     // fs::ScopedFileLock lock(dest);
@@ -2202,6 +2225,9 @@ static LrunResult run_code_with_inteactor(
       // use exe name as fallback
       run_cmd.push_back("./" + user_exe_name);
     }
+
+    if (mkfifo(i2u_pipe.c_str(), 0666) < 0) fatal("cannot create named pipe for interactor %s, %d", i2u_pipe.c_str(), errno);
+    if (mkfifo(u2i_pipe.c_str(), 0666) < 0) fatal("cannot create named pipe for interactor %s, %d", u2i_pipe.c_str(), errno);
 
     string src_name = get_src_name(etc_dir, code_path);
     map<string, string> mappings = get_mappings(src_name, user_exe_name, dest);
@@ -2220,8 +2246,7 @@ static LrunResult run_code_with_inteactor(
     lrun_args.append(escape_list(run_cmd, mappings));
     lrun_args.append(escape_list(extra_argv, mappings));
 
-    // LrunResult user_run_result = lrun(lrun_args, "interactor2user", "user2interactor", stderr_path);
-    LrunParams user_p = LrunParams{lrun_args, "interactor2user", "user2interactor", stderr_path};
+    LrunParams user_p = LrunParams{lrun_args, i2u_pipe, u2i_pipe, stderr_path};
     params.push_back(user_p);
   }
 
@@ -2238,9 +2263,9 @@ static LrunResult run_code_with_inteactor(
     }
 
     vector<string> interactor_argv;
-    interactor_argv.push_back(testcase.input_path);
-    interactor_argv.push_back("stdout");
-    interactor_argv.push_back(testcase.output_path);
+    interactor_argv.push_back("input");
+    interactor_argv.push_back("output");
+    interactor_argv.push_back("answer");
 
     string src_name = get_src_name(etc_dir, interactor_path);
     map<string, string> mappings = get_mappings(src_name, interactor_exe_name, interactor_dest);
@@ -2250,11 +2275,11 @@ static LrunResult run_code_with_inteactor(
     lrun_args.append_default();
     lrun_args.append("--chroot", interactor_chroot_path);
     lrun_args.append("--bindfs-ro", fs::join(interactor_chroot_path, "/tmp"), interactor_dest);
-    lrun_args.append("--bindfs-ro", fs::join(interactor_chroot_path, "/tmp", testcase.input_path), testcase.input_path);
-    lrun_args.append("--bindfs", fs::join(interactor_chroot_path, "/tmp", "stdout"), stdout_path);
-    lrun_args.append("--bindfs-ro", fs::join(interactor_chroot_path, "/tmp", testcase.output_path), testcase.output_path);
+    lrun_args.append("--bindfs-ro", fs::join(interactor_chroot_path, "/tmp", "input"), get_full_path(testcase.input_path));
+    lrun_args.append("--bindfs", fs::join(interactor_chroot_path, "/tmp", "output"), stdout_path);
+    lrun_args.append("--bindfs-ro", fs::join(interactor_chroot_path, "/tmp", "answer"), get_full_path(testcase.output_path));
     lrun_args.append(get_override_lrun_args(etc_dir, cache_dir, interactor_path, ENV_RUN, interactor_chroot_path, run_cmd.size() >= 2 ? (*run_cmd.begin()) : "" ));
-    lrun_args.append(limit);
+    lrun_args.append(interactor_limit);
     lrun_args.append(escape_list(extra_lrun_args, mappings));
     lrun_args.append(filter_user_lrun_args(escape_list(get_config_list(etc_dir, interactor_path, format("%s%s", env, EXT_LRUN_ARGS)), mappings), cache_dir));
     lrun_args.append(filter_user_lrun_args(escape_list(get_config_list(etc_dir, interactor_path, ENV_EXTRA EXT_LRUN_ARGS), mappings), cache_dir));
@@ -2264,12 +2289,43 @@ static LrunResult run_code_with_inteactor(
     lrun_args.append(escape_list(extra_argv, mappings));
 
     // LrunResult ineractor_run_result = lrun(lrun_args, "user2interactor", "interactor2user", stderr_path);
-    LrunParams interactor_p = LrunParams{lrun_args, "user2interactor", "interactor2user", stderr_path};
+    LrunParams interactor_p = LrunParams{lrun_args, u2i_pipe, i2u_pipe, stderr_path};
     params.push_back(interactor_p);
   }
 
-  vector<LrunResult> run_result = batch_lrun(params);
-  return run_result[0];
+  vector<LrunResult> results = batch_lrun(params);
+  return std::make_pair(results[0], results[1]);
+}
+
+static void handle_testlib_result(j::object& result, LrunResult& lrun_result, string& checker_output) {
+  string status = TestcaseResult::INTERNAL_ERROR;
+  string error_message;
+  static const int CHECKER_EXITCODE_ACCEPTED = 0;
+  static const int CHECKER_EXITCODE_WRONG_ANSWER = 1;
+  static const int CHECKER_EXITCODE_PRESENTATION_ERROR = 2;
+  // In most unix systems exit code is limited to 8 bits, -1 becomes 255
+  static const int LEGACY_CHECKER_EXITCODE_WRONG_ANSWER = 255;
+
+  if (!lrun_result.error.empty()) {
+    error_message = "lrun internal error: " + lrun_result.error;
+  } else if (!lrun_result.exceed.empty()) {
+    error_message = "checker exceeded " + lrun_result.exceed + " limit";
+  } else if (lrun_result.signaled) {
+    error_message = format("checker was killed by signal %d", lrun_result.term_sig);
+  } else if (lrun_result.exit_code == CHECKER_EXITCODE_ACCEPTED) {
+    status = TestcaseResult::ACCEPTED;
+  } else if (lrun_result.exit_code == CHECKER_EXITCODE_WRONG_ANSWER || lrun_result.exit_code == LEGACY_CHECKER_EXITCODE_WRONG_ANSWER) {
+    status = TestcaseResult::WRONG_ANSWER;
+  } else if (lrun_result.exit_code == CHECKER_EXITCODE_PRESENTATION_ERROR) {
+    status = TestcaseResult::PRESENTATION_ERROR;
+  } else {
+    error_message = format("unknown checker exit code %d", lrun_result.exit_code);
+  }
+
+  if (!checker_output.empty()) result["checkerOutput"] = j::value(checker_output);
+
+  if (!error_message.empty()) result["error"] = j::value(error_message);
+  result["result"] = j::value(status);
 }
 
 static void run_custom_checker(j::object& result, const string& etc_dir, const string& cache_dir, const string& code_path, const string& checker_code_path, const map<string, string>& envs, const Testcase& testcase, const string& user_output_path) {
@@ -2283,8 +2339,8 @@ static void run_custom_checker(j::object& result, const string& etc_dir, const s
 
 
   // extra lrun args
+  
   LrunArgs lrun_args;
-
   lrun_args.append("--bindfs-ro", "$chroot/tmp/input", get_full_path(testcase.input_path));
   lrun_args.append("--bindfs-ro", "$chroot/tmp/output", get_full_path(testcase.output_path));
   lrun_args.append("--bindfs-ro", "$chroot/tmp/user_output", get_full_path(user_output_path));
@@ -2306,10 +2362,9 @@ static void run_custom_checker(j::object& result, const string& etc_dir, const s
 
     // dest must be the same as the dest used for compile_code
     string dest = get_code_work_dir(fs::join(cache_dir, SUBDIR_CHECKER), checker_code_path);
-    lrun_result = run_code(etc_dir, cache_dir, dest, checker_code_path, testcase.checker_limit, testcase.input_path, output_path, DEV_NULL /* stderr */, lrun_args, ENV_CHECK, checker_argv);
+    lrun_result = run_code(etc_dir, cache_dir, dest, checker_code_path, testcase.checker_limit, testcase.input_path, output_path, output_path /* stderr */, lrun_args, ENV_CHECK, checker_argv);
     checker_output = fs::nread(output_path, TRUNC_LOG);
   }
-
   string status = TestcaseResult::INTERNAL_ERROR;
   string error_message;
   static const int CHECKER_EXITCODE_ACCEPTED = 0;
@@ -2350,6 +2405,8 @@ static j::object run_testcase(const string& etc_dir, const string& cache_dir, co
   string stdout_path = testcase.user_stdout_path.empty() ? get_temp_file_path(cache_dir, "out") : testcase.user_stdout_path;
   string stderr_path = testcase.user_stderr_path.empty() ? (keep_stderr ? get_temp_file_path(cache_dir, "err") : DEV_NULL) : testcase.user_stderr_path;
   LrunResult run_result;
+  LrunResult interactor_result;
+  string interactor_output;
   do {
     // should flock stdout_path, but since we use different tmp path, and it is scoped in pid dir. no more necessary
     // dest must be the same with dest used in compile_code
@@ -2359,7 +2416,8 @@ static j::object run_testcase(const string& etc_dir, const string& cache_dir, co
     } else {
       string interactor_dest = get_code_work_dir(fs::join(cache_dir, SUBDIR_INTERACTOR), interactor_code_path);
       // run with interactor
-      run_result = run_code_with_inteactor(etc_dir, cache_dir, dest, code_path, testcase.runtime_limit, interactor_dest, interactor_code_path, testcase.interactor_limit, testcase, testcase.input_path, stdout_path, stderr_path, vector<string>() /* extra_lrun_args */, ENV_RUN /* env */);
+      std::tie(run_result, interactor_result) = run_code_with_inteactor(etc_dir, cache_dir, dest, code_path, testcase.runtime_limit, interactor_dest, interactor_code_path, testcase.interactor_limit, testcase, testcase.input_path, stdout_path, stderr_path, vector<string>() /* extra_lrun_args */, ENV_RUN /* env */);
+      interactor_output = fs::nread(stdout_path, TRUNC_LOG);
     }
 
     // write stdout, stderr
@@ -2411,6 +2469,13 @@ static j::object run_testcase(const string& etc_dir, const string& cache_dir, co
       break;
     }
 
+    if(!interactor_code_path.empty()) {
+      handle_testlib_result(result, interactor_result, interactor_output);
+      if (interactor_result.exit_code != 0) {
+        break;
+      }
+    }
+
     if (skip_checker) {
       // just accept it
       result["result"] = j::value(TestcaseResult::ACCEPTED);
@@ -2441,16 +2506,16 @@ static j::value run_testcases(const Options& opts) {
   vector<j::value> results;
   results.resize(opts.cases.size());
   if (opts.total_time_limit > 0 || opts.skip_on_first_failure) {
-    double totalTime = 0;
+    double total_time = 0;
     for (int i = 0; i < (int)opts.cases.size(); ++i) {
       j::object testcase_result = run_testcase(opts.etc_dir, opts.cache_dir, opts.user_code_path, opts.interactor_code_path, opts.checker_code_path, opts.envs, opts.cases[i], opts.skip_checker, opts.keep_stdout, opts.keep_stderr, opts.ignore_presentation_error);
       results[i] = j::value(testcase_result);
       if (!testcase_result["time"].is<j::null>()) {
-        totalTime += testcase_result["time"].get<double>();
+        total_time += testcase_result["time"].get<double>();
       }
 
       j::object skipped_result;
-      bool total_time_limit_exceed = opts.total_time_limit > 0 && totalTime > opts.total_time_limit;
+      bool total_time_limit_exceed = opts.total_time_limit > 0 && total_time > opts.total_time_limit;
       bool first_failure = opts.skip_on_first_failure && testcase_result["result"].to_str() != TestcaseResult::ACCEPTED;
       if (total_time_limit_exceed) {
         skipped_result["result"] = j::value(TestcaseResult::TOTAL_TIME_LIMIT_EXCEEDED);
@@ -2526,7 +2591,7 @@ int main(int argc, char const *argv[]) {
     CompileResult compile_result = compile_code(opts.etc_dir, opts.cache_dir, dest, opts.interactor_code_path, opts.compiler_limit);
     write_compile_result(jo, compile_result, "interactorCompilation");
     if (!compile_result.success) compiled = false;
-    prepare_inteactor_named_pipe(dest);
+    prepare_inteactor_bind_files(dest);
   }
   if (compiled && !opts.checker_code_path.empty()) { // precompile checker code
     string dest = get_code_work_dir(fs::join(opts.cache_dir, SUBDIR_CHECKER), opts.checker_code_path);
