@@ -2263,9 +2263,7 @@ static std::pair<LrunResult, LrunResult> run_code_with_inteactor(
     }
 
     vector<string> interactor_argv;
-    interactor_argv.push_back("input");
     interactor_argv.push_back("output");
-    interactor_argv.push_back("answer");
 
     string src_name = get_src_name(etc_dir, interactor_path);
     map<string, string> mappings = get_mappings(src_name, interactor_exe_name, interactor_dest);
@@ -2449,6 +2447,13 @@ static j::object run_testcase(const string& etc_dir, const string& cache_dir, co
       break;
     }
 
+    if(!interactor_code_path.empty()) {
+      handle_testlib_result(result, interactor_result, interactor_output);
+      if (interactor_result.exit_code != 0) {
+        break;
+      }
+    }
+
     // check signaled and exit code
     if (run_result.signaled) {
       // check known signals
@@ -2467,13 +2472,6 @@ static j::object run_testcase(const string& etc_dir, const string& cache_dir, co
       result["exitcode"] = j::value((double)exitcode);
       result["result"] = j::value(TestcaseResult::NON_ZERO_EXIT_CODE);
       break;
-    }
-
-    if(!interactor_code_path.empty()) {
-      handle_testlib_result(result, interactor_result, interactor_output);
-      if (interactor_result.exit_code != 0) {
-        break;
-      }
     }
 
     if (skip_checker) {
