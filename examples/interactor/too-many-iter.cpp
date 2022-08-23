@@ -71,6 +71,7 @@ int main ()
 {
     srand(time(NULL));
     cerr << setprecision(10) << fixed;
+    cout << "" << endl << flush;
     assert(read());
     solve();
     return 0;
