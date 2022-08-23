@@ -2187,10 +2187,10 @@ static void prepare_checker_mount_bind_files(const string& dest) {
 static void prepare_inteactor_bind_files(const string& dest) {
   fs::touch(fs::join(dest, "input"));
   fs::touch(fs::join(dest, "output"));
-  fs::touch(fs::join(dest, "answer"));
+  fs::touch(fs::join(dest, "interactor_output"));
 }
 
-static std::pair<LrunResult, LrunResult> run_code_with_inteactor(
+static std::pair<LrunResult, LrunResult> run_code_with_interactor(
     const string& etc_dir,
     const string& cache_dir,
     const string& dest,
@@ -2263,7 +2263,7 @@ static std::pair<LrunResult, LrunResult> run_code_with_inteactor(
     }
 
     vector<string> interactor_argv;
-    interactor_argv.push_back("output");
+    interactor_argv.push_back("interactor_output");
 
     string src_name = get_src_name(etc_dir, interactor_path);
     map<string, string> mappings = get_mappings(src_name, interactor_exe_name, interactor_dest);
@@ -2274,8 +2274,8 @@ static std::pair<LrunResult, LrunResult> run_code_with_inteactor(
     lrun_args.append("--chroot", interactor_chroot_path);
     lrun_args.append("--bindfs-ro", fs::join(interactor_chroot_path, "/tmp"), interactor_dest);
     lrun_args.append("--bindfs-ro", fs::join(interactor_chroot_path, "/tmp", "input"), get_full_path(testcase.input_path));
-    lrun_args.append("--bindfs", fs::join(interactor_chroot_path, "/tmp", "output"), stdout_path);
-    lrun_args.append("--bindfs-ro", fs::join(interactor_chroot_path, "/tmp", "answer"), get_full_path(testcase.output_path));
+    lrun_args.append("--bindfs", fs::join(interactor_chroot_path, "/tmp", "interactor_output"), stdout_path);
+    lrun_args.append("--bindfs-ro", fs::join(interactor_chroot_path, "/tmp", "output"), get_full_path(testcase.output_path));
     lrun_args.append(get_override_lrun_args(etc_dir, cache_dir, interactor_path, ENV_RUN, interactor_chroot_path, run_cmd.size() >= 2 ? (*run_cmd.begin()) : "" ));
     lrun_args.append(interactor_limit);
     lrun_args.append(escape_list(extra_lrun_args, mappings));
@@ -2414,7 +2414,7 @@ static j::object run_testcase(const string& etc_dir, const string& cache_dir, co
     } else {
       string interactor_dest = get_code_work_dir(fs::join(cache_dir, SUBDIR_INTERACTOR), interactor_code_path);
       // run with interactor
-      std::tie(run_result, interactor_result) = run_code_with_inteactor(etc_dir, cache_dir, dest, code_path, testcase.runtime_limit, interactor_dest, interactor_code_path, testcase.interactor_limit, testcase, testcase.input_path, stdout_path, stderr_path, vector<string>() /* extra_lrun_args */, ENV_RUN /* env */);
+      std::tie(run_result, interactor_result) = run_code_with_interactor(etc_dir, cache_dir, dest, code_path, testcase.runtime_limit, interactor_dest, interactor_code_path, testcase.interactor_limit, testcase, testcase.input_path, stdout_path, stderr_path, vector<string>() /* extra_lrun_args */, ENV_RUN /* env */);
       interactor_output = fs::nread(stdout_path, TRUNC_LOG);
     }
 
