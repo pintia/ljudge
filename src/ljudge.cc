@@ -1686,7 +1686,6 @@ static vector<LrunResult> batch_lrun(
     }
   }
 #endif
-  // pause();
   vector<pid_t> pids(params.size());
   for (uint i = 0; i < params.size(); i++) {
     pid_t pid = fork();
@@ -2190,7 +2189,7 @@ static void prepare_inteactor_bind_files(const string& dest) {
   fs::touch(fs::join(dest, "answer"));
 }
 
-static std::pair<LrunResult, LrunResult> run_code_with_inteactor(
+static std::pair<LrunResult, LrunResult> run_code_with_interactor(
     const string& etc_dir,
     const string& cache_dir,
     const string& dest,
@@ -2292,6 +2291,8 @@ static std::pair<LrunResult, LrunResult> run_code_with_inteactor(
   }
 
   vector<LrunResult> results = batch_lrun(params);
+  fs::rm_rf(i2u_pipe);
+  fs::rm_rf(u2i_pipe);
   return std::make_pair(results[0], results[1]);
 }
 
@@ -2414,7 +2415,7 @@ static j::object run_testcase(const string& etc_dir, const string& cache_dir, co
     } else {
       string interactor_dest = get_code_work_dir(fs::join(cache_dir, SUBDIR_INTERACTOR), interactor_code_path);
       // run with interactor
-      std::tie(run_result, interactor_result) = run_code_with_inteactor(etc_dir, cache_dir, dest, code_path, testcase.runtime_limit, interactor_dest, interactor_code_path, testcase.interactor_limit, testcase, testcase.input_path, stdout_path, stderr_path, vector<string>() /* extra_lrun_args */, ENV_RUN /* env */);
+      std::tie(run_result, interactor_result) = run_code_with_interactor(etc_dir, cache_dir, dest, code_path, testcase.runtime_limit, interactor_dest, interactor_code_path, testcase.interactor_limit, testcase, testcase.input_path, stdout_path, stderr_path, vector<string>() /* extra_lrun_args */, ENV_RUN /* env */);
       interactor_output = fs::nread(stdout_path, TRUNC_LOG);
     }
 
