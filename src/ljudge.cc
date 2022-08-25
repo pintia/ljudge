@@ -2443,12 +2443,14 @@ static j::object run_testcase(const string& etc_dir, const string& cache_dir, co
         error_message = "interactor exceeded " + interactor_result.exceed + " limit";
       } else if (interactor_result.signaled) {
         error_message = format("interactor was killed by signal %d", interactor_result.term_sig);
-      } else if (VALID_CHECKER_EXITCODE.find(interactor_result.error_code) == VALID_CHECKER_EXITCODE.end()) {
+      } else if (std::find(VALID_CHECKER_EXITCODE.begin(), VALID_CHECKER_EXITCODE.end(), interactor_result.exit_code) == VALID_CHECKER_EXITCODE.end()) {
         error_message = format("unknown checker exit code %d", interactor_result.exit_code);
+      } 
+      if (!error_message.empty()) {
+        result["result"] = j::value(TestcaseResult::INTERNAL_ERROR);
+        result["error"] = j::value(error_message);
+        break;
       }
-      result["result"] = j::value(TestcaseResult::INTERNAL_ERROR);
-      result["error"] = j::value(error_mssage);
-      break;
     }
 
     // write memory, cpu_time
@@ -2492,6 +2494,7 @@ static j::object run_testcase(const string& etc_dir, const string& cache_dir, co
     }
 
     if (!interactor_code_path.empty()) {
+      string status;
       if (interactor_result.exit_code == CHECKER_EXITCODE_ACCEPTED) {
         status = TestcaseResult::ACCEPTED;
       } else if (interactor_result.exit_code == CHECKER_EXITCODE_WRONG_ANSWER || interactor_result.exit_code == LEGACY_CHECKER_EXITCODE_WRONG_ANSWER) {
@@ -2501,7 +2504,9 @@ static j::object run_testcase(const string& etc_dir, const string& cache_dir, co
       }
       if (!interactor_output.empty()) result["interactorOutput"] = j::value(interactor_output);
       result["result"] = j::value(status);
-      break;
+      if (status != TestcaseResult::ACCEPTED) {
+        break;
+      }
     }
 
     if (skip_checker) {
