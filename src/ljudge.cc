@@ -2442,6 +2442,15 @@ static j::object run_testcase(const string& etc_dir, const string& cache_dir, co
     // interactor's exceeded treated as internal error. so not handle here.
 
 
+    // pickup interactor's wa first
+    if (!interactor_code_path.empty()) {
+      if (interactor_result.exit_code == CHECKER_EXITCODE_WRONG_ANSWER || interactor_result.exit_code == LEGACY_CHECKER_EXITCODE_WRONG_ANSWER) {
+        if (!interactor_output.empty()) result["interactorOutput"] = j::value(interactor_output);
+        result["result"] = j::value(TestcaseResult::WRONG_ANSWER);
+        break;
+      }
+    }
+
     // check signaled and exit code
     if (run_result.signaled) {
       // check known signals
@@ -2466,8 +2475,6 @@ static j::object run_testcase(const string& etc_dir, const string& cache_dir, co
       string status;
       if (interactor_result.exit_code == CHECKER_EXITCODE_ACCEPTED) {
         status = TestcaseResult::ACCEPTED;
-      } else if (interactor_result.exit_code == CHECKER_EXITCODE_WRONG_ANSWER || interactor_result.exit_code == LEGACY_CHECKER_EXITCODE_WRONG_ANSWER) {
-        status = TestcaseResult::WRONG_ANSWER;
       } else if (interactor_result.exit_code == CHECKER_EXITCODE_PRESENTATION_ERROR) {
         status = TestcaseResult::PRESENTATION_ERROR;
       }
