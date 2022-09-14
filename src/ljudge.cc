@@ -113,6 +113,8 @@ namespace TestcaseResult {
   const string WRONG_ANSWER = "WRONG_ANSWER";
   const string SKIPPED = "SKIPPED";
   const string TOTAL_TIME_LIMIT_EXCEEDED= "TOTAL_TIME_LIMIT_EXCEEDED";
+  const string CHECKER_ERROR = "CHECKER_ERROR";
+  const string INTERACTOR_ERROR = "INTERACTOR_ERROR";
   /* [[[end]]] */
 };
 
@@ -2433,7 +2435,7 @@ static void run_custom_checker(j::object& result, const string& etc_dir, const s
     lrun_result = run_code(etc_dir, cache_dir, dest, checker_code_path, testcase.checker_limit, testcase.input_path, output_path, output_path /* stderr */, lrun_args, ENV_CHECK, checker_argv, "", "", with_writable_tmp);
     checker_output = fs::nread(output_path, TRUNC_LOG);
   }
-  string status = TestcaseResult::INTERNAL_ERROR;
+  string status = TestcaseResult::CHECKER_ERROR;
   string error_message;
 
   if (!lrun_result.error.empty()) {
@@ -2509,7 +2511,7 @@ static j::object run_testcase(const string& etc_dir, const string& cache_dir, co
         error_message = format("unknown interactor exit code %d", interactor_result.exit_code);
       } 
       if (!error_message.empty()) {
-        result["result"] = j::value(TestcaseResult::INTERNAL_ERROR);
+        result["result"] = j::value(TestcaseResult::INTERACTOR_ERROR);
         result["error"] = j::value(error_message);
         break;
       }
