@@ -2215,7 +2215,7 @@ static std::pair<LrunResult, LrunResult> run_code_with_interactor(
   string user_exe_name = get_config_content(etc_dir, code_path, ENV_COMPILE EXT_EXE_NAME, DEFAULT_EXE_NAME);
 
   string i2u_pipe = fs::join(cache_dir, format("%s-%s", "i2u", get_random_hash()));
-  string u2i_pipe = fs::join(cache_dir, format("%s-%s", "i2u", get_random_hash()));
+  string u2i_pipe = fs::join(cache_dir, format("%s-%s", "u2i", get_random_hash()));
 
   {
     // not locking here because the directory is read-only
