@@ -2099,7 +2099,8 @@ static LrunResult run_code(
     const string& stderr_path = DEV_NULL,
     const vector<string>& extra_lrun_args = vector<string>(),
     const string& env = ENV_RUN,
-    const vector<string>& extra_argv = vector<string>()
+    const vector<string>& extra_argv = vector<string>(),
+    const bool bindfs_rw = false
 ) {
   log_debug("run_code: %s", code_path.c_str());
 
@@ -2123,7 +2124,8 @@ static LrunResult run_code(
     LrunArgs lrun_args;
     lrun_args.append_default();
     lrun_args.append("--chroot", chroot_path);
-    lrun_args.append("--bindfs-ro", fs::join(chroot_path, "/tmp"), dest);
+    if (bindfs_rw) lrun_args.append("--bindfs", fs::join(chroot_path, "/tmp"), dest);
+    else lrun_args.append("--bindfs-ro", fs::join(chroot_path, "/tmp"), dest);
     lrun_args.append(get_override_lrun_args(etc_dir, cache_dir, code_path, ENV_RUN, chroot_path, run_cmd.size() >= 2 ? (*run_cmd.begin()) : "" ));
     lrun_args.append(limit);
     lrun_args.append(escape_list(extra_lrun_args, mappings));
@@ -2408,7 +2410,7 @@ static j::object run_testcase(const string& etc_dir, const string& cache_dir, co
       string input_content = fs::read(testcase.input_path);
       size_t n = fs::write(dest_input_path, input_content.c_str());
       if (n != input_content.length()) fatal("fail to copy input file to %s", dest_input_path.c_str());
-      run_result = run_code(etc_dir, cache_dir, dest, code_path, testcase.runtime_limit, DEV_NULL, stdout_path, stderr_path, vector<string>() /* extra_lrun_args */, ENV_RUN /* env */);
+      run_result = run_code(etc_dir, cache_dir, dest, code_path, testcase.runtime_limit, DEV_NULL, stdout_path, stderr_path, vector<string>() /* extra_lrun_args */, ENV_RUN /* env */, vector<string>() /* extra_argv */, true /* bindfs_rw */);
     }
     else if(interactor_code_path.empty()) {
       run_result = run_code(etc_dir, cache_dir, dest, code_path, testcase.runtime_limit, testcase.input_path, stdout_path, stderr_path, vector<string>() /* extra_lrun_args */, ENV_RUN /* env */);
