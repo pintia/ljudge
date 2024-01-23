@@ -1481,6 +1481,10 @@ static Options parse_cli_options(int argc, const char *argv[]) {
     } else if (option == "ignore-presentation-error") {
       options.ignore_presentation_error = true;
     } else if (option == "use-path-as-io") {
+      if (options.nthread > 1) {
+          fatal("'use-path-as-io' does not work with threads");
+      }
+      options.nthread = 1;
       options.use_path_as_io = true;
     } else if (option == "path-as-input") {
       REQUIRE_NARGV(1);
@@ -2100,7 +2104,8 @@ static LrunResult run_code(
     const vector<string>& extra_lrun_args = vector<string>(),
     const string& env = ENV_RUN,
     const vector<string>& extra_argv = vector<string>(),
-    const bool bindfs_rw = false
+    const bool use_path_as_io = false,
+    const string& path_as_input = ""
 ) {
   log_debug("run_code: %s", code_path.c_str());
 
@@ -2124,7 +2129,10 @@ static LrunResult run_code(
     LrunArgs lrun_args;
     lrun_args.append_default();
     lrun_args.append("--chroot", chroot_path);
-    if (bindfs_rw) lrun_args.append("--bindfs", fs::join(chroot_path, "/tmp"), dest);
+    if (use_path_as_io) {
+      lrun_args.append("--bindfs", fs::join(chroot_path, "/tmp"), dest);
+      lrun_args.append("--bindfs-ro", fs::join(fs::join(chroot_path, "/tmp"), path_as_input), stdin_path);
+    }
     else lrun_args.append("--bindfs-ro", fs::join(chroot_path, "/tmp"), dest);
     lrun_args.append(get_override_lrun_args(etc_dir, cache_dir, code_path, ENV_RUN, chroot_path, run_cmd.size() >= 2 ? (*run_cmd.begin()) : "" ));
     lrun_args.append(limit);
@@ -2135,7 +2143,9 @@ static LrunResult run_code(
     lrun_args.append(escape_list(run_cmd, mappings));
     lrun_args.append(escape_list(extra_argv, mappings));
 
-    LrunResult run_result = lrun(lrun_args, stdin_path, stdout_path, stderr_path);
+    LrunResult run_result;
+    if (use_path_as_io) lrun(lrun_args, DEV_NULL, stdout_path, stderr_path);
+    else lrun(lrun_args, stdin_path, stdout_path, stderr_path);
 
     return run_result;
   }
@@ -2388,7 +2398,7 @@ static void run_custom_checker(j::object& result, const string& etc_dir, const s
   result["result"] = j::value(status);
 }
 
-static j::object run_testcase(const string& etc_dir, const string& cache_dir, const string& code_path, const string& interactor_code_path, const string& checker_code_path, const map<string, string>& envs, const Testcase& testcase, bool skip_checker = false, bool keep_stdout = false, bool keep_stderr = false, bool ignore_presentation_error = false, bool use_file_io = false, const string& path_as_input = "", const string& path_as_output = "") {
+static j::object run_testcase(const string& etc_dir, const string& cache_dir, const string& code_path, const string& interactor_code_path, const string& checker_code_path, const map<string, string>& envs, const Testcase& testcase, bool skip_checker = false, bool keep_stdout = false, bool keep_stderr = false, bool ignore_presentation_error = false, bool use_path_as_io = false, const string& path_as_input = "", const string& path_as_output = "") {
   log_debug("run_testcase: %s", testcase.input_path.c_str());
 
   // assume user code and checker code are pre-compiled
@@ -2404,13 +2414,9 @@ static j::object run_testcase(const string& etc_dir, const string& cache_dir, co
     // should flock stdout_path, but since we use different tmp path, and it is scoped in pid dir. no more necessary
     // dest must be the same with dest used in compile_code
     string dest = get_code_work_dir(get_process_tmp_dir(cache_dir), code_path);
-    if (use_file_io) {
-      // TODO: copy input into dest?
-      string dest_input_path = fs::join(dest, path_as_input);
-      string input_content = fs::read(testcase.input_path);
-      size_t n = fs::write(dest_input_path, input_content.c_str());
-      if (n != input_content.length()) fatal("fail to copy input file to %s", dest_input_path.c_str());
-      run_result = run_code(etc_dir, cache_dir, dest, code_path, testcase.runtime_limit, DEV_NULL, stdout_path, stderr_path, vector<string>() /* extra_lrun_args */, ENV_RUN /* env */, vector<string>() /* extra_argv */, true /* bindfs_rw */);
+    if (use_path_as_io) {
+      // TODO: bind input into dest?
+      run_result = run_code(etc_dir, cache_dir, dest, code_path, testcase.runtime_limit, testcase.input_path, stdout_path, stderr_path, vector<string>() /* extra_lrun_args */, ENV_RUN /* env */, vector<string>() /* extra_argv */, use_path_as_io /* use_path_as_io */, path_as_input /* path_as_input */);
     }
     else if(interactor_code_path.empty()) {
       run_result = run_code(etc_dir, cache_dir, dest, code_path, testcase.runtime_limit, testcase.input_path, stdout_path, stderr_path, vector<string>() /* extra_lrun_args */, ENV_RUN /* env */);
@@ -2518,7 +2524,7 @@ static j::object run_testcase(const string& etc_dir, const string& cache_dir, co
     } else {
       //TODO: fix output?
       string output_path;
-      if (use_file_io) {
+      if (use_path_as_io) {
         output_path = fs::join(dest, path_as_output);
       } else {
         output_path = stdout_path;
