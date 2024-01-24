@@ -2131,7 +2131,8 @@ static LrunResult run_code(
     lrun_args.append("--chroot", chroot_path);
     if (use_path_as_io) {
       lrun_args.append("--bindfs", fs::join(chroot_path, "/tmp"), dest);
-      lrun_args.append("--bindfs-ro", fs::join(fs::join(chroot_path, "/tmp"), path_as_input), stdin_path);
+      fs::touch(fs::join(fs::join(chroot_path, "/tmp"), path_as_input));
+      lrun_args.append("--bindfs-ro", fs::join(fs::join(chroot_path, "/tmp"), path_as_input), fs::make_absolute(stdin_path));
     }
     else lrun_args.append("--bindfs-ro", fs::join(chroot_path, "/tmp"), dest);
     lrun_args.append(get_override_lrun_args(etc_dir, cache_dir, code_path, ENV_RUN, chroot_path, run_cmd.size() >= 2 ? (*run_cmd.begin()) : "" ));
