@@ -1609,7 +1609,6 @@ static void setfd(int dst, int src) {
 
 static LrunResult parse_lrun_output(const string& lrun_output) {
   LrunResult result;
-  log_debug("in parse_lrun_output: %s\n", lrun_output.c_str());
   size_t pos = 0, start = 0;
   for (;;) {
     pos = lrun_output.find("\n", start);
@@ -1632,7 +1631,6 @@ static LrunResult parse_lrun_output(const string& lrun_output) {
         if (sscanf(value.c_str(), "%lf", &time) != 1) result.error = "cannot read REALTIME";
         else result.real_time = time;
       } else if (key == "SIGNALED") {
-        log_debug("here: %s %s\n", key.c_str(), value.c_str());
         if (value == "0") {
           result.signaled = false;
         } else if (value == "1") {
