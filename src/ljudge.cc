@@ -738,6 +738,7 @@ static void print_usage() {
       "         [--skip-on-first-failure]\n"
       "         [--ignore-presentation-error]\n"
       "         [--total-time-limit seconds]\n"
+      "         [--use-path-as-io] [--path-as-input] [--path-as-output]\n"
       "         [--max-cpu-time seconds] [--max-real-time seconds]\n"
       "         [--max-memory bytes] [--max-output bytes] [--max-stack bytes]\n"
       "         [--max-checker-cpu-time seconds] [--max-checker-real-time seconds]\n"
