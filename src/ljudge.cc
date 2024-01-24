@@ -1608,6 +1608,7 @@ static void setfd(int dst, int src) {
 
 static LrunResult parse_lrun_output(const string& lrun_output) {
   LrunResult result;
+  log_debug("in parse_lrun_output: %s\n", lrun_output.c_str());
   size_t pos = 0, start = 0;
   for (;;) {
     pos = lrun_output.find("\n", start);
@@ -1630,6 +1631,7 @@ static LrunResult parse_lrun_output(const string& lrun_output) {
         if (sscanf(value.c_str(), "%lf", &time) != 1) result.error = "cannot read REALTIME";
         else result.real_time = time;
       } else if (key == "SIGNALED") {
+        log_debug("here: %s %s\n", key.c_str(), value.c_str());
         if (value == "0") {
           result.signaled = false;
         } else if (value == "1") {
@@ -2131,7 +2133,7 @@ static LrunResult run_code(
     lrun_args.append("--chroot", chroot_path);
     if (use_path_as_io) {
       lrun_args.append("--bindfs", fs::join(chroot_path, "/tmp"), dest);
-      fs::touch(fs::join(fs::join(chroot_path, "/tmp"), path_as_input));
+      fs::touch(fs::join(dest, path_as_input));
       lrun_args.append("--bindfs-ro", fs::join(fs::join(chroot_path, "/tmp"), path_as_input), fs::make_absolute(stdin_path));
     }
     else lrun_args.append("--bindfs-ro", fs::join(chroot_path, "/tmp"), dest);
@@ -2145,8 +2147,8 @@ static LrunResult run_code(
     lrun_args.append(escape_list(extra_argv, mappings));
 
     LrunResult run_result;
-    if (use_path_as_io) lrun(lrun_args, DEV_NULL, stdout_path, stderr_path);
-    else lrun(lrun_args, stdin_path, stdout_path, stderr_path);
+    if (use_path_as_io) run_result = lrun(lrun_args, DEV_NULL, stdout_path, stderr_path);
+    else run_result = lrun(lrun_args, stdin_path, stdout_path, stderr_path);
 
     return run_result;
   }
@@ -2416,7 +2418,6 @@ static j::object run_testcase(const string& etc_dir, const string& cache_dir, co
     // dest must be the same with dest used in compile_code
     string dest = get_code_work_dir(get_process_tmp_dir(cache_dir), code_path);
     if (use_path_as_io) {
-      // TODO: bind input into dest?
       run_result = run_code(etc_dir, cache_dir, dest, code_path, testcase.runtime_limit, testcase.input_path, stdout_path, stderr_path, vector<string>() /* extra_lrun_args */, ENV_RUN /* env */, vector<string>() /* extra_argv */, use_path_as_io /* use_path_as_io */, path_as_input /* path_as_input */);
     }
     else if(interactor_code_path.empty()) {
@@ -2523,7 +2524,6 @@ static j::object run_testcase(const string& etc_dir, const string& cache_dir, co
       // just accept it
       result["result"] = j::value(TestcaseResult::ACCEPTED);
     } else {
-      //TODO: fix output?
       string output_path;
       if (use_path_as_io) {
         output_path = fs::join(dest, path_as_output);
