@@ -1,4 +1,5 @@
 #include "fs.hpp"
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <dirent.h>
@@ -8,6 +9,7 @@
 #include <unistd.h>
 #include <sys/file.h>
 #include <sys/types.h>
+#include <linux/limits.h>
 
 using std::string;
 
@@ -295,6 +297,20 @@ string fs::resolve(const string& path) {
 cleanup:
   if (buf) free(buf);
   return result;
+}
+
+
+string fs::make_absolute(const string& path) {
+  if (is_absolute(path)) return path;
+  else {
+    char buf[PATH_MAX];
+    char* succeed = getcwd(buf, PATH_MAX);
+    if (NULL == succeed) {
+        return path;
+    }
+    string result = join(string(succeed), path);
+    return result;
+  }
 }
 
 fs::ScopedFileLock::ScopedFileLock(const string& path) {

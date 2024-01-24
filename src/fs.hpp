@@ -44,6 +44,7 @@ namespace fs {
   bool is_mounted(const std::string& path);
   std::list<std::string> scandir(const std::string& path);
   std::string resolve(const std::string& path);
+  std::string make_absolute(const std::string& path);
 
   extern const char PATH_SEPARATOR;
 

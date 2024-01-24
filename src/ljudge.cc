@@ -152,6 +152,14 @@ struct Options {
   bool skip_on_first_failure;  // skip test cases after first failure occured
   double total_time_limit;  // seconds
   bool ignore_presentation_error;
+  /**
+   * if true
+   * use path_as_input with content of testcase input, besides user program
+   * use path_as_output to read user program's output, compare with testcase output
+   */
+  bool use_path_as_io;
+  string path_as_input;
+  string path_as_output;
 };
 
 struct LrunArgs : public vector<string> {
@@ -730,6 +738,7 @@ static void print_usage() {
       "         [--skip-on-first-failure]\n"
       "         [--ignore-presentation-error]\n"
       "         [--total-time-limit seconds]\n"
+      "         [--use-path-as-io] [--path-as-input] [--path-as-output]\n"
       "         [--max-cpu-time seconds] [--max-real-time seconds]\n"
       "         [--max-memory bytes] [--max-output bytes] [--max-stack bytes]\n"
       "         [--max-checker-cpu-time seconds] [--max-checker-real-time seconds]\n"
@@ -1277,8 +1286,9 @@ static Options parse_cli_options(int argc, const char *argv[]) {
     options.direct_mode = false;
     options.nthread = 0;
     options.skip_on_first_failure = false;
-    options.ignore_presentation_error = false;
     options.total_time_limit = -1.0;
+    options.ignore_presentation_error = false;
+    options.use_path_as_io = false;
     current_case.checker_limit = { 5, 10, 1 << 30, 1 << 30, 1 << 30 };
     current_case.interactor_limit = { 5, 10, 1 << 30, 1 << 30, 1 << 30 };
     current_case.runtime_limit = { 1, 3, 1 << 26 /* 64M mem */, 1 << 25 /* 32M output */, 1 << 23 /* 8M stack limit */ };
@@ -1466,11 +1476,23 @@ static Options parse_cli_options(int argc, const char *argv[]) {
       }
       options.nthread = 1;
       options.skip_on_first_failure = true;
-    } else if (option == "ignore-presentation-error") {
-      options.ignore_presentation_error = true;
     } else if (option == "total-time-limit") {
       REQUIRE_NARGV(1);
       options.total_time_limit = NEXT_NUMBER_ARG;
+    } else if (option == "ignore-presentation-error") {
+      options.ignore_presentation_error = true;
+    } else if (option == "use-path-as-io") {
+      if (options.nthread > 1) {
+          fatal("'use-path-as-io' does not work with threads");
+      }
+      options.nthread = 1;
+      options.use_path_as_io = true;
+    } else if (option == "path-as-input") {
+      REQUIRE_NARGV(1);
+      options.path_as_input = NEXT_STRING_ARG;
+    } else if (option == "path-as-output") {
+      REQUIRE_NARGV(1);
+      options.path_as_output = NEXT_STRING_ARG;
     } else {
       fatal("'%s' is not a valid option", argv[i]);
     }
@@ -2082,7 +2104,9 @@ static LrunResult run_code(
     const string& stderr_path = DEV_NULL,
     const vector<string>& extra_lrun_args = vector<string>(),
     const string& env = ENV_RUN,
-    const vector<string>& extra_argv = vector<string>()
+    const vector<string>& extra_argv = vector<string>(),
+    const bool use_path_as_io = false,
+    const string& path_as_input = ""
 ) {
   log_debug("run_code: %s", code_path.c_str());
 
@@ -2106,7 +2130,12 @@ static LrunResult run_code(
     LrunArgs lrun_args;
     lrun_args.append_default();
     lrun_args.append("--chroot", chroot_path);
-    lrun_args.append("--bindfs-ro", fs::join(chroot_path, "/tmp"), dest);
+    if (use_path_as_io) {
+      lrun_args.append("--bindfs", fs::join(chroot_path, "/tmp"), dest);
+      fs::touch(fs::join(dest, path_as_input));
+      lrun_args.append("--bindfs-ro", fs::join(fs::join(chroot_path, "/tmp"), path_as_input), fs::make_absolute(stdin_path));
+    }
+    else lrun_args.append("--bindfs-ro", fs::join(chroot_path, "/tmp"), dest);
     lrun_args.append(get_override_lrun_args(etc_dir, cache_dir, code_path, ENV_RUN, chroot_path, run_cmd.size() >= 2 ? (*run_cmd.begin()) : "" ));
     lrun_args.append(limit);
     lrun_args.append(escape_list(extra_lrun_args, mappings));
@@ -2116,7 +2145,9 @@ static LrunResult run_code(
     lrun_args.append(escape_list(run_cmd, mappings));
     lrun_args.append(escape_list(extra_argv, mappings));
 
-    LrunResult run_result = lrun(lrun_args, stdin_path, stdout_path, stderr_path);
+    LrunResult run_result;
+    if (use_path_as_io) run_result = lrun(lrun_args, DEV_NULL, stdout_path, stderr_path);
+    else run_result = lrun(lrun_args, stdin_path, stdout_path, stderr_path);
 
     return run_result;
   }
@@ -2369,7 +2400,7 @@ static void run_custom_checker(j::object& result, const string& etc_dir, const s
   result["result"] = j::value(status);
 }
 
-static j::object run_testcase(const string& etc_dir, const string& cache_dir, const string& code_path, const string& interactor_code_path, const string& checker_code_path, const map<string, string>& envs, const Testcase& testcase, bool skip_checker = false, bool keep_stdout = false, bool keep_stderr = false, bool ignore_presentation_error = false) {
+static j::object run_testcase(const string& etc_dir, const string& cache_dir, const string& code_path, const string& interactor_code_path, const string& checker_code_path, const map<string, string>& envs, const Testcase& testcase, bool skip_checker = false, bool keep_stdout = false, bool keep_stderr = false, bool ignore_presentation_error = false, bool use_path_as_io = false, const string& path_as_input = "", const string& path_as_output = "") {
   log_debug("run_testcase: %s", testcase.input_path.c_str());
 
   // assume user code and checker code are pre-compiled
@@ -2385,7 +2416,10 @@ static j::object run_testcase(const string& etc_dir, const string& cache_dir, co
     // should flock stdout_path, but since we use different tmp path, and it is scoped in pid dir. no more necessary
     // dest must be the same with dest used in compile_code
     string dest = get_code_work_dir(get_process_tmp_dir(cache_dir), code_path);
-    if(interactor_code_path.empty()) {
+    if (use_path_as_io) {
+      run_result = run_code(etc_dir, cache_dir, dest, code_path, testcase.runtime_limit, testcase.input_path, stdout_path, stderr_path, vector<string>() /* extra_lrun_args */, ENV_RUN /* env */, vector<string>() /* extra_argv */, use_path_as_io /* use_path_as_io */, path_as_input /* path_as_input */);
+    }
+    else if(interactor_code_path.empty()) {
       run_result = run_code(etc_dir, cache_dir, dest, code_path, testcase.runtime_limit, testcase.input_path, stdout_path, stderr_path, vector<string>() /* extra_lrun_args */, ENV_RUN /* env */);
     } else {
       string interactor_dest = get_code_work_dir(fs::join(cache_dir, SUBDIR_INTERACTOR), interactor_code_path);
@@ -2489,11 +2523,17 @@ static j::object run_testcase(const string& etc_dir, const string& cache_dir, co
       // just accept it
       result["result"] = j::value(TestcaseResult::ACCEPTED);
     } else {
+      string output_path;
+      if (use_path_as_io) {
+        output_path = fs::join(dest, path_as_output);
+      } else {
+        output_path = stdout_path;
+      }
       // run checker
       if (checker_code_path.empty()) {
-        run_standard_checker(result, testcase, stdout_path);
+        run_standard_checker(result, testcase, output_path);
       } else {
-        run_custom_checker(result, etc_dir, cache_dir, code_path, checker_code_path, envs, testcase, stdout_path);
+        run_custom_checker(result, etc_dir, cache_dir, code_path, checker_code_path, envs, testcase, output_path);
       }
     }
 
@@ -2517,7 +2557,7 @@ static j::value run_testcases(const Options& opts) {
   if (opts.total_time_limit > 0 || opts.skip_on_first_failure) {
     double total_time = 0;
     for (int i = 0; i < (int)opts.cases.size(); ++i) {
-      j::object testcase_result = run_testcase(opts.etc_dir, opts.cache_dir, opts.user_code_path, opts.interactor_code_path, opts.checker_code_path, opts.envs, opts.cases[i], opts.skip_checker, opts.keep_stdout, opts.keep_stderr, opts.ignore_presentation_error);
+      j::object testcase_result = run_testcase(opts.etc_dir, opts.cache_dir, opts.user_code_path, opts.interactor_code_path, opts.checker_code_path, opts.envs, opts.cases[i], opts.skip_checker, opts.keep_stdout, opts.keep_stderr, opts.ignore_presentation_error, opts.use_path_as_io, opts.path_as_input, opts.path_as_output);
       results[i] = j::value(testcase_result);
       if (!testcase_result["time"].is<j::null>()) {
         total_time += testcase_result["time"].get<double>();
@@ -2544,7 +2584,7 @@ static j::value run_testcases(const Options& opts) {
     #pragma omp parallel for if (opts.nthread != 1 && opts.cases.size() > 1)
 #endif
     for (int i = 0; i < (int)opts.cases.size(); ++i) {
-      j::object testcase_result = run_testcase(opts.etc_dir, opts.cache_dir, opts.user_code_path, opts.interactor_code_path, opts.checker_code_path, opts.envs, opts.cases[i], opts.skip_checker, opts.keep_stdout, opts.keep_stderr, opts.ignore_presentation_error);
+      j::object testcase_result = run_testcase(opts.etc_dir, opts.cache_dir, opts.user_code_path, opts.interactor_code_path, opts.checker_code_path, opts.envs, opts.cases[i], opts.skip_checker, opts.keep_stdout, opts.keep_stderr, opts.ignore_presentation_error, opts.use_path_as_io, opts.path_as_input, opts.path_as_output);
       results[i] = j::value(testcase_result);
     }
   }
