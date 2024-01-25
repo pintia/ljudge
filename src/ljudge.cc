@@ -2133,7 +2133,9 @@ static LrunResult run_code(
     }
     if (!path_as_stdin.empty()) {
       // bind input to file, let user's program read.
-      fs::touch(fs::join(dest, path_as_stdin));
+      string input_path = fs::join(dest, path_as_stdin);
+      fs::mkdir_p(fs::dirname(input_path));
+      fs::touch(input_path);
       lrun_args.append("--bindfs-ro", fs::join(fs::join(chroot_path, "/tmp"), path_as_stdin), fs::make_absolute(stdin_path));
     }
     lrun_args.append(get_override_lrun_args(etc_dir, cache_dir, code_path, ENV_RUN, chroot_path, run_cmd.size() >= 2 ? (*run_cmd.begin()) : "" ));
