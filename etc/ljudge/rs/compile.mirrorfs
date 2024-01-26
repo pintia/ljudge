@@ -8,3 +8,5 @@ mirror /lib64/
 mirror /var/lib/
 mirror /etc/ld.so.cache
 mirror /etc/alternatives/
+# rust
+mirror /opt/rust/
