@@ -1,4 +1,4 @@
-gcc
+clang
 $src
 -MMD
 -MP
@@ -26,5 +26,9 @@ $src
 -I/home/judger/GNUstep/Library/Headers
 -I/usr/local/include/GNUstep
 -I/usr/include/GNUstep
+-rdynamic
+-shared-libgcc
+-lobjc
+-lm
 -o
 $exe
