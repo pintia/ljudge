@@ -1,0 +1,12 @@
+mkdir /dev
+mkdir /tmp
+mirror /lib/
+mirror /lib64/
+mirror /usr/lib*/
+mirror /etc/ld.so.cache
+# gnustep need proc
+mkdir /proc
+mirror /etc/passwd
+mirror /etc/group
+mirror /etc/subuid
+mirror /etc/subgid
