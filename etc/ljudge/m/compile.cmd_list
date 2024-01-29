@@ -6,7 +6,6 @@ $src
 -DGNUSTEP_BASE_LIBRARY=1
 -DGNU_GUI_LIBRARY=1
 -DGNU_RUNTIME=1
--DGNUSTEP_BASE_LIBRARY=1
 -fno-strict-aliasing
 -fexceptions
 -fobjc-exceptions
@@ -28,6 +27,7 @@ $src
 -I/usr/include/GNUstep
 -rdynamic
 -shared-libgcc
+-lgnustep-base
 -lobjc
 -lm
 -o
