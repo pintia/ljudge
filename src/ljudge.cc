@@ -1521,6 +1521,14 @@ static Options parse_cli_options(int argc, const char *argv[]) {
       options.total_time_limit = NEXT_NUMBER_ARG;
     } else if (option == "ignore-presentation-error") {
       options.ignore_presentation_error = true;
+    } else if (option == "compile-with-writable-tmp") {
+
+    } else if (option == "run-with-writable-tmp") {
+            
+    } else if (option == "checker-with-writable-tmp") {
+
+    } else if (option == "interactor-with-writable-tmp") {
+
     } else if (option == "path-as-stdin") {
       if (options.nthread > 1) {
         fatal("'path-as-stdin' does not work with threads");
@@ -2149,7 +2157,8 @@ static LrunResult run_code(
     const string& env = ENV_RUN,
     const vector<string>& extra_argv = vector<string>(),
     const string& path_as_stdin = "",
-    const string& path_as_stdout = ""
+    const string& path_as_stdout = "",
+    const bool writable_tmp = false
 ) {
   log_debug("run_code: %s", code_path.c_str());
 
@@ -2173,10 +2182,10 @@ static LrunResult run_code(
     LrunArgs lrun_args;
     lrun_args.append_default();
     lrun_args.append("--chroot", chroot_path);
-    if (path_as_stdout.empty()) {
+    if (!writable_tmp && path_as_stdout.empty()) {
       lrun_args.append("--bindfs-ro", fs::join(chroot_path, "/tmp"), dest);
     } else {
-      // user's program will write file.
+      // configured or user's program will write file.
       lrun_args.append("--bindfs", fs::join(chroot_path, "/tmp"), dest);
     }
     if (!path_as_stdin.empty()) {
