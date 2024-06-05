@@ -534,7 +534,7 @@ static list<string> get_override_lrun_args(const string& etc_dir, const string& 
           string name = *it;
           string path = name;
           string_replacei(path, "__", "/");
-          if (fs::is_accessible(get_config_path(etc_dir, code_path, name), R_OK)) {
+          if (fs::is_accessible(get_config_path(etc_dir, code_path, name), R_OK) && fs::touch(fs::join(chroot_path, path))) {
               result.push_back("--bindfs-ro");
               result.push_back(fs::join(chroot_path, path));
               result.push_back(get_config_path(etc_dir, code_path, name));
