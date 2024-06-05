@@ -21,6 +21,7 @@ namespace fs {
   size_t size(const std::string& path);
   std::string read(const std::string& path);
   std::string nread(const std::string& path, int len);
+  std::list<std::string> readlines(const std::string& path);
   int write(const std::string& path, const char *buffer);
   int nwrite(const std::string& path, const char *buffer, int len);
   int mkdir(const std::string& path, int mode);

@@ -78,6 +78,7 @@ namespace j = picojson;
 #define EXT_NAME ".name"
 #define EXT_OPT_FAKE_PASSWD "fake_passwd"
 #define EXT_FS_OVERRIDE ".fs_override"
+#define EXT_FILE_OVERRIDE ".file_override"
 #define EXT_SRC_NAME ".src_name"
 
 // config file names which are options
@@ -509,20 +510,38 @@ static list<string> get_override_lrun_args(const string& etc_dir, const string& 
 
   // override_dir in config
   string override_dir = get_config_path(etc_dir, code_path, format("%s%s", env, EXT_FS_OVERRIDE));
-  if (override_dir.empty()) return result;
-
-  list<string> files = fs::scandir(override_dir);
-  for (__typeof(files.begin()) it = files.begin(); it != files.end(); ++it) {
-    // treat "__" as "/"
-    string name = *it;
-    string path = name;
-    string_replacei(path, "__", "/");
-    if (fs::is_accessible(fs::join(chroot_path, path), R_OK)) {
-      result.push_back("--bindfs-ro");
-      result.push_back(fs::join(chroot_path, path));
-      result.push_back(fs::join(override_dir, name));
-    }
+  if (!override_dir.empty()) {
+      list<string> files = fs::scandir(override_dir);
+      for (__typeof(files.begin()) it = files.begin(); it != files.end(); ++it) {
+          // treat "__" as "/"
+          string name = *it;
+          string path = name;
+          string_replacei(path, "__", "/");
+          if (fs::is_accessible(fs::join(chroot_path, path), R_OK)) {
+              result.push_back("--bindfs-ro");
+              result.push_back(fs::join(chroot_path, path));
+              result.push_back(fs::join(override_dir, name));
+          }
+      }
   }
+
+  // override_file in config
+  string override_file = get_config_path(etc_dir, code_path, format("%s%s", env, EXT_FILE_OVERRIDE));
+  if (!override_file.empty()) {
+      list<string> files = fs::readlines(override_file);
+      for (__typeof(files.begin()) it = files.begin(); it != files.end(); ++it) {
+          // treat "__" as "/"
+          string name = *it;
+          string path = name;
+          string_replacei(path, "__", "/");
+          if (fs::is_accessible(get_config_path(etc_dir, code_path, name), R_OK)) {
+              result.push_back("--bindfs-ro")
+              result.push_back(fs::join(chroot_path, path));
+              result.push_back(get_config_path(etc_dir, code_path, name));
+          }
+      }
+  }
+
   return result;
 }
 

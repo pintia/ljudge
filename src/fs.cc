@@ -62,6 +62,17 @@ string fs::nread (const string& path, int len) {
   return stringize(fs_nread(path.c_str(), len));
 }
 
+std::list<string> fs::readlines(const string& path) {
+    std::list<string> result;
+    std::stringstream ss(fs_read(path.c_str()))
+    std::string line;
+
+    while (std::getline(ss, line,'\n')) {
+        result.push_bash(line);
+    }
+    return result;
+}
+
 int fs::write (const string& path, const char *buffer){
   return fs_write(path.c_str(), buffer);
 }
