@@ -6,6 +6,7 @@
 #include <list>
 #include <mntent.h>
 #include <string>
+#include <sstream>
 #include <unistd.h>
 #include <sys/file.h>
 #include <sys/types.h>
@@ -64,11 +65,11 @@ string fs::nread (const string& path, int len) {
 
 std::list<string> fs::readlines(const string& path) {
     std::list<string> result;
-    std::stringstream ss(fs_read(path.c_str()))
+    std::stringstream ss(fs_read(path.c_str()));
     std::string line;
 
     while (std::getline(ss, line,'\n')) {
-        result.push_bash(line);
+        result.push_back(line);
     }
     return result;
 }
