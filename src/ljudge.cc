@@ -569,9 +569,11 @@ static list<string> get_env_lrun_args(const string& etc_dir, const string& code_
                 result.push_back(value);
             } else {
                 const char *env_val = getenv(env_var.c_str());
-                result.push_back("--env");
-                result.push_back(env_var);
-                result.push_back(env_val);
+                if (env_val) {
+                    result.push_back("--env");
+                    result.push_back(env_var);
+                    result.push_back(env_val);
+                }
             }
         }
     }
