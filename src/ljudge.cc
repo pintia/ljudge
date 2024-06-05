@@ -79,6 +79,7 @@ namespace j = picojson;
 #define EXT_OPT_FAKE_PASSWD "fake_passwd"
 #define EXT_FS_OVERRIDE ".fs_override"
 #define EXT_FILE_OVERRIDE ".file_add"
+#define EXT_ENV_APPEND ".env"
 #define EXT_SRC_NAME ".src_name"
 
 // config file names which are options
@@ -237,14 +238,14 @@ struct LrunArgs : public vector<string> {
     append("--env", "LC_ALL", "en_US.UTF-8");
     append("--env", "HOME", "/tmp");
     append("--env", "PATH", "/usr/bin:/bin:/etc/alternatives:/usr/local/bin");
-    append("--env", "DOTNET_CLI_TELEMETRY_OPTOUT", "1");
-    append("--env", "COMPlus_EnableDiagnostics", "0");
+//    append("--env", "DOTNET_CLI_TELEMETRY_OPTOUT", "1");
+//    append("--env", "COMPlus_EnableDiagnostics", "0");
     // Pass as-is
-    static const char pass_envs[][16] = {"JAVA_HOME", "R_HOME"};
-    for (size_t i = 0; i < sizeof(pass_envs) / sizeof(pass_envs[0]); ++i) {
-      const char *env_val = getenv(pass_envs[i]);
-      if (env_val) append("--env", pass_envs[i], env_val);
-    }
+//    static const char pass_envs[][16] = {"JAVA_HOME", "R_HOME"};
+//    for (size_t i = 0; i < sizeof(pass_envs) / sizeof(pass_envs[0]); ++i) {
+//      const char *env_val = getenv(pass_envs[i]);
+//      if (env_val) append("--env", pass_envs[i], env_val);
+//    }
   }
 
 protected:
@@ -548,6 +549,34 @@ static list<string> get_override_lrun_args(const string& etc_dir, const string& 
   }
 
   return result;
+}
+
+static list<string> get_env_lrun_args(const string& etc_dir, const string& code_path, const string& env) {
+    list<string> result;
+
+    // env in config
+    string env_file = get_config_path(etc_dir, code_path, format("%s%s", env, EXT_ENV_APPEND));
+    if (!env_file.empty()) {
+        list<string> env_vars = fs::readlines(env_file);
+        for (__typeof(env_vars.begin()) it = env_vars.begin(); it != env_vars.end(); ++it) {
+            string env_var = *it;
+            size_t pos = env_var.find("=");
+            if (pos != string::npos) {
+                string key = env_var.substr(0, pos);
+                string value = env_var.substr(pos+1);
+                result.push_back("--env");
+                result.push_back(key);
+                result.push_back(value);
+            } else {
+                const char *env_val = getenv(env_var.c_str());
+                result.push_back("--env");
+                result.push_back(env_var);
+                result.push_back(env_val);
+            }
+        }
+    }
+
+    return result;
 }
 
 static string uname_r() {
@@ -2070,6 +2099,7 @@ static CompileResult compile_code(const string& etc_dir, const string& cache_dir
     lrun_args.append(filter_user_lrun_args(escape_list(get_config_list(etc_dir, code_path, ENV_EXTRA EXT_LRUN_ARGS), mappings), cache_dir));
     // Override/Provide (hide/bind) files using user provided options
     lrun_args.append(get_override_lrun_args(etc_dir, cache_dir, code_path, ENV_COMPILE, chroot_path, dest));
+    lrun_args.append(get_env_lrun_args(etc_dir, code_path, ENV_COMPILE));
     lrun_args.append("--");
     lrun_args.append(escape_list(compile_cmd, mappings));
 
@@ -2163,6 +2193,7 @@ static LrunResult run_code(
       lrun_args.append("--bindfs-ro", fs::join(fs::join(chroot_path, "/tmp"), path_as_stdin), fs::make_absolute(stdin_path));
     }
     lrun_args.append(get_override_lrun_args(etc_dir, cache_dir, code_path, ENV_RUN, chroot_path, dest, run_cmd.size() >= 2 ? (*run_cmd.begin()) : "" ));
+    lrun_args.append(get_env_lrun_args(etc_dir, code_path, ENV_RUN));
     lrun_args.append(limit);
     lrun_args.append(escape_list(extra_lrun_args, mappings));
     lrun_args.append(filter_user_lrun_args(escape_list(get_config_list(etc_dir, code_path, format("%s%s", env, EXT_LRUN_ARGS)), mappings), cache_dir));
@@ -2294,6 +2325,7 @@ static std::pair<LrunResult, LrunResult> run_code_with_interactor(
     lrun_args.append("--chroot", user_chroot_path);
     lrun_args.append("--bindfs-ro", fs::join(user_chroot_path, "/tmp"), dest);
     lrun_args.append(get_override_lrun_args(etc_dir, cache_dir, code_path, ENV_RUN, user_chroot_path, dest, run_cmd.size() >= 2 ? (*run_cmd.begin()) : "" ));
+    lrun_args.append(get_env_lrun_args(etc_dir, code_path, ENV_RUN));
     lrun_args.append(limit);
     lrun_args.append(escape_list(extra_lrun_args, mappings));
     lrun_args.append(filter_user_lrun_args(escape_list(get_config_list(etc_dir, code_path, format("%s%s", env, EXT_LRUN_ARGS)), mappings), cache_dir));
@@ -2333,6 +2365,7 @@ static std::pair<LrunResult, LrunResult> run_code_with_interactor(
     lrun_args.append("--bindfs", fs::join(interactor_chroot_path, "/tmp", "interactor_output"), stdout_path);
     lrun_args.append("--bindfs-ro", fs::join(interactor_chroot_path, "/tmp", "output"), get_full_path(testcase.output_path));
     lrun_args.append(get_override_lrun_args(etc_dir, cache_dir, interactor_path, ENV_RUN, interactor_chroot_path, interactor_dest, run_cmd.size() >= 2 ? (*run_cmd.begin()) : "" ));
+    lrun_args.append(get_env_lrun_args(etc_dir, code_path, ENV_RUN));
     lrun_args.append(interactor_limit);
     lrun_args.append(escape_list(extra_lrun_args, mappings));
     lrun_args.append(filter_user_lrun_args(escape_list(get_config_list(etc_dir, interactor_path, format("%s%s", env, EXT_LRUN_ARGS)), mappings), cache_dir));
