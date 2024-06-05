@@ -78,7 +78,7 @@ namespace j = picojson;
 #define EXT_NAME ".name"
 #define EXT_OPT_FAKE_PASSWD "fake_passwd"
 #define EXT_FS_OVERRIDE ".fs_override"
-#define EXT_FILE_OVERRIDE ".file_override"
+#define EXT_FILE_OVERRIDE ".file_add"
 #define EXT_SRC_NAME ".src_name"
 
 // config file names which are options
@@ -237,6 +237,8 @@ struct LrunArgs : public vector<string> {
     append("--env", "LC_ALL", "en_US.UTF-8");
     append("--env", "HOME", "/tmp");
     append("--env", "PATH", "/usr/bin:/bin:/etc/alternatives:/usr/local/bin");
+    append("--env", "DOTNET_CLI_TELEMETRY_OPTOUT", "1");
+    append("--env", "COMPlus_EnableDiagnostics", "0");
     // Pass as-is
     static const char pass_envs[][16] = {"JAVA_HOME", "R_HOME"};
     for (size_t i = 0; i < sizeof(pass_envs) / sizeof(pass_envs[0]); ++i) {
@@ -498,7 +500,7 @@ static string prepare_dummy_passwd(const string& cache_dir) {
   return path;
 }
 
-static list<string> get_override_lrun_args(const string& etc_dir, const string& cache_dir, const string& code_path, const string& env, const string& chroot_path, const string& interpreter_name = "") {
+static list<string> get_override_lrun_args(const string& etc_dir, const string& cache_dir, const string& code_path, const string& env, const string& chroot_path, const string& dest, const string& interpreter_name = "") {
   list<string> result;
   // Hide real /etc/passwd (required by Python) on demand
   if (fs::exists(fs::join(chroot_path, ETC_PASSWD)) && get_config_content(etc_dir, code_path, format("%s%s", env, EXT_OPT_FAKE_PASSWD), OPTION_VALUE_TRUE) == OPTION_VALUE_TRUE) {
@@ -525,7 +527,7 @@ static list<string> get_override_lrun_args(const string& etc_dir, const string& 
       }
   }
 
-  // override_file in config
+  // override_file in config, only support provide file into work dir
   string override_file = get_config_path(etc_dir, code_path, format("%s%s", env, EXT_FILE_OVERRIDE));
   if (!override_file.empty()) {
       list<string> files = fs::readlines(override_file);
@@ -534,7 +536,10 @@ static list<string> get_override_lrun_args(const string& etc_dir, const string& 
           string name = *it;
           string path = name;
           string_replacei(path, "__", "/");
-          if (fs::is_accessible(get_config_path(etc_dir, code_path, name), R_OK) && fs::touch(fs::join(chroot_path, path))) {
+          if (fs::is_accessible(get_config_path(etc_dir, code_path, name), R_OK) && path.rfind("/tmp") == 0) {
+              string inner_path = path.substr(4);
+              fs::mkdir_p(fs::join(dest, fs::dirname(inner_path)));
+              fs::touch(fs::join(dest, fs::basename(inner_path)));
               result.push_back("--bindfs-ro");
               result.push_back(fs::join(chroot_path, path));
               result.push_back(get_config_path(etc_dir, code_path, name));
@@ -2063,8 +2068,8 @@ static CompileResult compile_code(const string& etc_dir, const string& cache_dir
     map<string, string> mappings = get_mappings(src_name, exe_name, dest);
     lrun_args.append(filter_user_lrun_args(escape_list(get_config_list(etc_dir, code_path, ENV_COMPILE EXT_LRUN_ARGS), mappings), cache_dir));
     lrun_args.append(filter_user_lrun_args(escape_list(get_config_list(etc_dir, code_path, ENV_EXTRA EXT_LRUN_ARGS), mappings), cache_dir));
-    // Override (hide) files using user provided options
-    lrun_args.append(get_override_lrun_args(etc_dir, cache_dir, code_path, ENV_COMPILE, chroot_path));
+    // Override/Provide (hide/bind) files using user provided options
+    lrun_args.append(get_override_lrun_args(etc_dir, cache_dir, code_path, ENV_COMPILE, chroot_path, dest));
     lrun_args.append("--");
     lrun_args.append(escape_list(compile_cmd, mappings));
 
@@ -2157,7 +2162,7 @@ static LrunResult run_code(
       fs::touch(input_path);
       lrun_args.append("--bindfs-ro", fs::join(fs::join(chroot_path, "/tmp"), path_as_stdin), fs::make_absolute(stdin_path));
     }
-    lrun_args.append(get_override_lrun_args(etc_dir, cache_dir, code_path, ENV_RUN, chroot_path, run_cmd.size() >= 2 ? (*run_cmd.begin()) : "" ));
+    lrun_args.append(get_override_lrun_args(etc_dir, cache_dir, code_path, ENV_RUN, chroot_path, dest, run_cmd.size() >= 2 ? (*run_cmd.begin()) : "" ));
     lrun_args.append(limit);
     lrun_args.append(escape_list(extra_lrun_args, mappings));
     lrun_args.append(filter_user_lrun_args(escape_list(get_config_list(etc_dir, code_path, format("%s%s", env, EXT_LRUN_ARGS)), mappings), cache_dir));
@@ -2288,7 +2293,7 @@ static std::pair<LrunResult, LrunResult> run_code_with_interactor(
     lrun_args.append_default();
     lrun_args.append("--chroot", user_chroot_path);
     lrun_args.append("--bindfs-ro", fs::join(user_chroot_path, "/tmp"), dest);
-    lrun_args.append(get_override_lrun_args(etc_dir, cache_dir, code_path, ENV_RUN, user_chroot_path, run_cmd.size() >= 2 ? (*run_cmd.begin()) : "" ));
+    lrun_args.append(get_override_lrun_args(etc_dir, cache_dir, code_path, ENV_RUN, user_chroot_path, dest, run_cmd.size() >= 2 ? (*run_cmd.begin()) : "" ));
     lrun_args.append(limit);
     lrun_args.append(escape_list(extra_lrun_args, mappings));
     lrun_args.append(filter_user_lrun_args(escape_list(get_config_list(etc_dir, code_path, format("%s%s", env, EXT_LRUN_ARGS)), mappings), cache_dir));
@@ -2327,7 +2332,7 @@ static std::pair<LrunResult, LrunResult> run_code_with_interactor(
     lrun_args.append("--bindfs-ro", fs::join(interactor_chroot_path, "/tmp", "input"), get_full_path(testcase.input_path));
     lrun_args.append("--bindfs", fs::join(interactor_chroot_path, "/tmp", "interactor_output"), stdout_path);
     lrun_args.append("--bindfs-ro", fs::join(interactor_chroot_path, "/tmp", "output"), get_full_path(testcase.output_path));
-    lrun_args.append(get_override_lrun_args(etc_dir, cache_dir, interactor_path, ENV_RUN, interactor_chroot_path, run_cmd.size() >= 2 ? (*run_cmd.begin()) : "" ));
+    lrun_args.append(get_override_lrun_args(etc_dir, cache_dir, interactor_path, ENV_RUN, interactor_chroot_path, interactor_dest, run_cmd.size() >= 2 ? (*run_cmd.begin()) : "" ));
     lrun_args.append(interactor_limit);
     lrun_args.append(escape_list(extra_lrun_args, mappings));
     lrun_args.append(filter_user_lrun_args(escape_list(get_config_list(etc_dir, interactor_path, format("%s%s", env, EXT_LRUN_ARGS)), mappings), cache_dir));

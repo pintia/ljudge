@@ -1,7 +1,9 @@
 mkdir /dev
+mkdir /proc
 mkdir /tmp
 mirror /lib/
 mirror /lib64/
+mirror /var/lib/
 mirror /usr/lib*/
 mirror /etc/ld.so.cache
-mkdir /proc
+mirror /usr/share/dotnet/
