@@ -6,3 +6,4 @@ while true do
   | null -> exit 0
   | _ -> let a = line.Split [|' '|] |> Seq.sumBy int
          printfn "%d" a
+
