@@ -6,6 +6,7 @@
 #include <list>
 #include <mntent.h>
 #include <string>
+#include <sstream>
 #include <unistd.h>
 #include <sys/file.h>
 #include <sys/types.h>
@@ -60,6 +61,17 @@ string fs::read (const string& path) {
 
 string fs::nread (const string& path, int len) {
   return stringize(fs_nread(path.c_str(), len));
+}
+
+std::list<string> fs::readlines(const string& path) {
+    std::list<string> result;
+    std::stringstream ss(fs_read(path.c_str()));
+    std::string line;
+
+    while (std::getline(ss, line,'\n')) {
+        result.push_back(line);
+    }
+    return result;
 }
 
 int fs::write (const string& path, const char *buffer){

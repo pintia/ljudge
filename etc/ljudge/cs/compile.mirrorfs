@@ -7,6 +7,5 @@ mirror /lib/
 mirror /lib64/
 mirror /var/lib/
 mirror /etc/ld.so.cache
-mirror /etc/alternatives/
-# mono
-mirror /etc/mono/
+# required by dotnet
+touch /etc/passwd
