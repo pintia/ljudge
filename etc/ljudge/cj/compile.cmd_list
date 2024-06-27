@@ -1,0 +1,7 @@
+cjc
+-O2
+-Won
+all
+$src
+-o
+$exe
