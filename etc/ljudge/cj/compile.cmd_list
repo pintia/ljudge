@@ -1,0 +1,11 @@
+cjc
+--conditional-compilation-config
+(ENV=ONLINE_JUDGE)
+-O2
+-Won
+all
+--error-count-limit
+10
+$src
+-o
+$exe
