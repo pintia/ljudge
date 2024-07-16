@@ -1,4 +1,6 @@
 cjc
+--cfg
+ENV=ONLINE_JUDGE
 -O2
 -Won
 all
