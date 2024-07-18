@@ -1323,14 +1323,6 @@ static Options parse_cli_options(int argc, const char *argv[]) {
     options.cache_dir = fs::join(home, ".cache/ljudge");
     options.compiler_limit = { 5, 10, 1 << 29 /* 512M mem */, 1 << 27 /* 128M out */ };
     options.pretty_print = isatty(STDOUT_FILENO);
-    options.skip_checker = false;
-    options.keep_stdout = false;
-    options.keep_stderr = false;
-    options.direct_mode = false;
-    options.nthread = 0;
-    options.skip_on_first_failure = false;
-    options.total_time_limit = -1.0;
-    options.ignore_presentation_error = false;
     current_case.checker_limit = { 5, 10, 1 << 30, 1 << 30, 1 << 30 };
     current_case.interactor_limit = { 5, 10, 1 << 30, 1 << 30, 1 << 30 };
     current_case.runtime_limit = { 1, 3, 1 << 26 /* 64M mem */, 1 << 25 /* 32M output */, 1 << 23 /* 8M stack limit */ };
@@ -2179,13 +2171,9 @@ static LrunResult run_code(
     lrun_args.append_default();
     lrun_args.append("--chroot", chroot_path);
     if (!with_writable_tmp && path_as_stdout.empty()) {
-      log_debug("ro /tmp");
       lrun_args.append("--bindfs-ro", fs::join(chroot_path, "/tmp"), dest);
     } else {
       // configured or user's program will write file.
-      log_debug("flag1: %d", with_writable_tmp);
-      log_debug("flag2: %d", path_as_stdout.empty());
-      log_debug("rw /tmp");
       lrun_args.append("--bindfs", fs::join(chroot_path, "/tmp"), dest);
     }
     if (!path_as_stdin.empty()) {
@@ -2328,10 +2316,8 @@ static std::pair<LrunResult, LrunResult> run_code_with_interactor(
     lrun_args.append_default();
     lrun_args.append("--chroot", user_chroot_path);
     if (with_writable_tmp) {
-      log_debug("rw /tmp");
       lrun_args.append("--bindfs", fs::join(user_chroot_path, "/tmp"), dest);
     } else {
-      log_debug("ro /tmp");
       lrun_args.append("--bindfs-ro", fs::join(user_chroot_path, "/tmp"), dest);
     }
     lrun_args.append(get_override_lrun_args(etc_dir, cache_dir, code_path, ENV_RUN, user_chroot_path, dest, run_cmd.size() >= 2 ? (*run_cmd.begin()) : "" ));
@@ -2371,10 +2357,8 @@ static std::pair<LrunResult, LrunResult> run_code_with_interactor(
     lrun_args.append_default();
     lrun_args.append("--chroot", interactor_chroot_path);
     if (with_writable_tmp) {
-      log_debug("rw /tmp");
       lrun_args.append("--bindfs", fs::join(interactor_chroot_path, "/tmp"), interactor_dest);
     } else {
-      log_debug("ro /tmp");
       lrun_args.append("--bindfs-ro", fs::join(interactor_chroot_path, "/tmp"), interactor_dest);
     }
     lrun_args.append("--bindfs-ro", fs::join(interactor_chroot_path, "/tmp", "input"), get_full_path(testcase.input_path));
