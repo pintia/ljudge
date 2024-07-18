@@ -145,18 +145,18 @@ struct Options {
   Limit compiler_limit;
   vector<Testcase> cases;
   map<string, string> envs;
-  bool pretty_print;
-  bool skip_checker;  // if true, do not run can checker, but capture user program's output
-  bool keep_stdout;
-  bool keep_stderr;
-  bool direct_mode;  // if true, just run the program and prints the result
-  int nthread;  // how many testcases can run in parallel. default is decided by omp (cpu cores
-  bool skip_on_first_failure;  // skip test cases after first failure occured
-  double total_time_limit;  // seconds
-  bool ignore_presentation_error;
+  bool pretty_print = false;
+  bool skip_checker = false;  // if true, do not run can checker, but capture user program's output
+  bool keep_stdout = false;
+  bool keep_stderr = false;
+  bool direct_mode = false;  // if true, just run the program and prints the result
+  int nthread = 0;  // how many testcases can run in parallel. default is decided by omp (cpu cores
+  bool skip_on_first_failure = false;  // skip test cases after first failure occured
+  double total_time_limit = -1.0;  // seconds
+  bool ignore_presentation_error = false;
   string path_as_stdin; // if not empty, user program should read data from path;
   string path_as_stdout; // if not empty, user program should write data to path;
-  bool with_writable_tmp; // if true, when running, tmp dir is writable;
+  bool with_writable_tmp = false; // if true, when running, tmp dir is writable;
 };
 
 struct LrunArgs : public vector<string> {
@@ -1323,14 +1323,6 @@ static Options parse_cli_options(int argc, const char *argv[]) {
     options.cache_dir = fs::join(home, ".cache/ljudge");
     options.compiler_limit = { 5, 10, 1 << 29 /* 512M mem */, 1 << 27 /* 128M out */ };
     options.pretty_print = isatty(STDOUT_FILENO);
-    options.skip_checker = false;
-    options.keep_stdout = false;
-    options.keep_stderr = false;
-    options.direct_mode = false;
-    options.nthread = 0;
-    options.skip_on_first_failure = false;
-    options.total_time_limit = -1.0;
-    options.ignore_presentation_error = false;
     current_case.checker_limit = { 5, 10, 1 << 30, 1 << 30, 1 << 30 };
     current_case.interactor_limit = { 5, 10, 1 << 30, 1 << 30, 1 << 30 };
     current_case.runtime_limit = { 1, 3, 1 << 26 /* 64M mem */, 1 << 25 /* 32M output */, 1 << 23 /* 8M stack limit */ };
