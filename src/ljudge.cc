@@ -145,18 +145,18 @@ struct Options {
   Limit compiler_limit;
   vector<Testcase> cases;
   map<string, string> envs;
-  bool pretty_print;
-  bool skip_checker;  // if true, do not run can checker, but capture user program's output
-  bool keep_stdout;
-  bool keep_stderr;
-  bool direct_mode;  // if true, just run the program and prints the result
-  int nthread;  // how many testcases can run in parallel. default is decided by omp (cpu cores
-  bool skip_on_first_failure;  // skip test cases after first failure occured
-  double total_time_limit;  // seconds
-  bool ignore_presentation_error;
+  bool pretty_print = false;
+  bool skip_checker = false;  // if true, do not run can checker, but capture user program's output
+  bool keep_stdout = false;
+  bool keep_stderr = false;
+  bool direct_mode = false;  // if true, just run the program and prints the result
+  int nthread = 0;  // how many testcases can run in parallel. default is decided by omp (cpu cores
+  bool skip_on_first_failure = false;  // skip test cases after first failure occured
+  double total_time_limit = -1.0;  // seconds
+  bool ignore_presentation_error = false;
   string path_as_stdin; // if not empty, user program should read data from path;
   string path_as_stdout; // if not empty, user program should write data to path;
-  bool with_writable_tmp; // if true, when running, tmp dir is writable;
+  bool with_writable_tmp = false; // if true, when running, tmp dir is writable;
 };
 
 struct LrunArgs : public vector<string> {
@@ -2179,9 +2179,13 @@ static LrunResult run_code(
     lrun_args.append_default();
     lrun_args.append("--chroot", chroot_path);
     if (!with_writable_tmp && path_as_stdout.empty()) {
+      log_debug("ro /tmp");
       lrun_args.append("--bindfs-ro", fs::join(chroot_path, "/tmp"), dest);
     } else {
       // configured or user's program will write file.
+      log_debug("flag1: %d", with_writable_tmp);
+      log_debug("flag2: %d", path_as_stdout.empty());
+      log_debug("rw /tmp");
       lrun_args.append("--bindfs", fs::join(chroot_path, "/tmp"), dest);
     }
     if (!path_as_stdin.empty()) {
@@ -2324,8 +2328,10 @@ static std::pair<LrunResult, LrunResult> run_code_with_interactor(
     lrun_args.append_default();
     lrun_args.append("--chroot", user_chroot_path);
     if (with_writable_tmp) {
+      log_debug("rw /tmp");
       lrun_args.append("--bindfs", fs::join(user_chroot_path, "/tmp"), dest);
     } else {
+      log_debug("ro /tmp");
       lrun_args.append("--bindfs-ro", fs::join(user_chroot_path, "/tmp"), dest);
     }
     lrun_args.append(get_override_lrun_args(etc_dir, cache_dir, code_path, ENV_RUN, user_chroot_path, dest, run_cmd.size() >= 2 ? (*run_cmd.begin()) : "" ));
@@ -2365,8 +2371,10 @@ static std::pair<LrunResult, LrunResult> run_code_with_interactor(
     lrun_args.append_default();
     lrun_args.append("--chroot", interactor_chroot_path);
     if (with_writable_tmp) {
+      log_debug("rw /tmp");
       lrun_args.append("--bindfs", fs::join(interactor_chroot_path, "/tmp"), interactor_dest);
     } else {
+      log_debug("ro /tmp");
       lrun_args.append("--bindfs-ro", fs::join(interactor_chroot_path, "/tmp"), interactor_dest);
     }
     lrun_args.append("--bindfs-ro", fs::join(interactor_chroot_path, "/tmp", "input"), get_full_path(testcase.input_path));
