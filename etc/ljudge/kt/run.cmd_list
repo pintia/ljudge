@@ -1,3 +1,4 @@
-java
--jar
-Main.jar
+kotlin
+-Dfile.encoding=UTF-8
+-J-XX:+UseSerialGC
+MainKt

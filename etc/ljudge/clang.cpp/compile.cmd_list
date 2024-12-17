@@ -2,7 +2,7 @@ clang++
 -DONLINE_JUDGE
 -O2
 -Wall
--std=c++17
+-std=c++20
 -pipe
 $src
 -lm
