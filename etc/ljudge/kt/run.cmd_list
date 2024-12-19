@@ -1,3 +1,5 @@
 java
+-Dfile.encoding=UTF-8
+-XX:+UseSerialGC
 -jar
 Main.jar
