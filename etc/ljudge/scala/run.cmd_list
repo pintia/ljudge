@@ -1,6 +1,4 @@
 java
 -Dfile.encoding=UTF-8
 -XX:+UseSerialGC
--cp
-Main.jar:/usr/lib/scala-library.jar
 Main

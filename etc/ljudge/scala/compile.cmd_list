@@ -1,6 +1,2 @@
 scalac
--encoding
-UTF8
 $src
--d
-Main.jar
