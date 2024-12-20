@@ -1,5 +1,2 @@
 kotlinc
 $src
--include-runtime
--d
-Main.jar
