@@ -19,6 +19,8 @@
 #include <sys/types.h>
 #include <sys/utsname.h>
 #include <sys/wait.h>
+#include <sys/mman.h>
+#include <pthread.h>
 #include <time.h>
 #include <unistd.h>
 #include <vector>
@@ -1713,6 +1715,8 @@ static vector<LrunResult> batch_lrun(
 ) {
   vector<int *> pipes(params.size());
   vector<LrunResult> results(params.size());
+  pthread_barrier_t* shared_barrier = (pthread_barrier_t*)mmap(NULL, sizeof(pthread_barrier_t), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+  pthread_barrier_init(shared_barrier, NULL, params.size());
   for (uint i = 0; i < params.size(); i++) {
     pipes[i] = new int[2];
     results[i] = LrunResult();
@@ -1801,6 +1805,7 @@ static vector<LrunResult> batch_lrun(
         argv[i + 1] = args[i].c_str();
       }
       argv[args.size() + 1] = 0;
+      pthread_barrier_wait(shared_barrier);
       execvp("lrun", (char * const *) argv);
       close(pipes[i][1]);
       log_error("can not start lrun");
