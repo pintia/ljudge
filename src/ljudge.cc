@@ -1770,12 +1770,8 @@ static vector<LrunResult> batch_lrun(
       // prepare fds
       if (!stdin_path.empty()) {
         fclose(stdin);
-        int ret = open(stdin_path.c_str(), O_RDONLY | O_NONBLOCK);
+        int ret = open(stdin_path.c_str(), O_RDONLY);
         if (ret < 0) fatal("can not open %s for reading", stdin_path.c_str());
-        // reset to blocking
-        int opts = fcntl(ret, F_GETFL);
-        opts = opts & (~O_NONBLOCK);
-        fcntl(ret, F_SETFL, opts);
         setfd(STDIN_FILENO, ret);
       }
       if (!stderr_path.empty()) {
