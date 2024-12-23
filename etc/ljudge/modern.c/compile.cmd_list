@@ -1,6 +1,6 @@
 gcc
 -DONLINE_JUDGE
-# http://codeforces.com/blog/entry/11450#comment-164021
+-pedantic-errors
 -fno-tree-ch
 -O2
 -Wall
