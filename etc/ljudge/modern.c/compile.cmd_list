@@ -1,8 +1,10 @@
-clang++
+gcc
 -DONLINE_JUDGE
+-pedantic-errors
+-fno-tree-ch
 -O2
 -Wall
--std=c++20
+-std=gnu11
 -pipe
 $src
 -lm

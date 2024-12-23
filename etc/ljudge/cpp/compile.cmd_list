@@ -4,7 +4,7 @@ g++
 -fno-tree-ch
 -O2
 -Wall
--std=c++17
+-std=gnu++20
 -pipe
 $src
 -lm
