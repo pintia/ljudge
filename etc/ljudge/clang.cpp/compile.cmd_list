@@ -3,6 +3,7 @@ clang++
 -O2
 -Wall
 -std=c++20
+-stdlib=libc++
 -pipe
 $src
 -lm
