@@ -1471,6 +1471,10 @@ static Options parse_cli_options(int argc, const char *argv[]) {
       REQUIRE_NARGV(1);
       current_case.interactor_limit.memory = parse_bytes(NEXT_STRING_ARG);
     } else if (option == "max-multipass-iteration") {
+      if (options.nthread > 1) {
+        fatal("'max-multipass-iteration' does not work with threads");
+      }
+      options.nthread = 1;
       REQUIRE_NARGV(1);
       current_case.max_multipass_iteration = NEXT_NUMBER_ARG;
     /* [[[end]]] */
@@ -2267,12 +2271,14 @@ static void prepare_checker_mount_bind_files(const string& dest) {
   fs::touch(fs::join(dest, "output"));
   fs::touch(fs::join(dest, "user_output"));
   fs::touch(fs::join(dest, "user_code"));
+  fs::touch(fs::join(dest, "judgemessage.txt"));
 }
 
 static void prepare_inteactor_bind_files(const string& dest) {
   fs::touch(fs::join(dest, "input"));
   fs::touch(fs::join(dest, "output"));
   fs::touch(fs::join(dest, "interactor_output"));
+  fs::touch(fs::join(dest, "judgemessage.txt"));
 }
 
 static std::pair<LrunResult, LrunResult> run_code_with_interactor(
@@ -2291,7 +2297,8 @@ static std::pair<LrunResult, LrunResult> run_code_with_interactor(
     const vector<string>& extra_lrun_args = vector<string>(),
     const string& env = ENV_RUN,
     const vector<string>& extra_argv = vector<string>(),
-    const bool& with_writable_tmp = false
+    const bool& with_writable_tmp = false,
+    const string& judgemessage_path = DEV_NULL
 ) {
   log_debug("run_code_with_interactor: %s", code_path.c_str());
 
@@ -2300,8 +2307,11 @@ static std::pair<LrunResult, LrunResult> run_code_with_interactor(
   string user_chroot_path = prepare_chroot(etc_dir, code_path, env);
   string user_exe_name = get_config_content(etc_dir, code_path, ENV_COMPILE EXT_EXE_NAME, DEFAULT_EXE_NAME);
 
+  // can not create name pip by get_temp_file_path
   string i2u_pipe = fs::join(cache_dir, format("%s-%s", "i2u", get_random_hash()));
   string u2i_pipe = fs::join(cache_dir, format("%s-%s", "u2i", get_random_hash()));
+  register_cleanup_path(i2u_pipe);
+  register_cleanup_path(u2i_pipe);
 
   bool multipass = testcase.max_multipass_iteration > 0;
 
@@ -2373,6 +2383,7 @@ static std::pair<LrunResult, LrunResult> run_code_with_interactor(
     lrun_args.append("--bindfs-ro", fs::join(interactor_chroot_path, "/tmp", "input"), get_full_path(testcase.input_path));
     lrun_args.append("--bindfs", fs::join(interactor_chroot_path, "/tmp", "interactor_output"), stdout_path);
     lrun_args.append("--bindfs-ro", fs::join(interactor_chroot_path, "/tmp", "output"), get_full_path(testcase.output_path));
+    lrun_args.append("--bindfs", fs::join(interactor_chroot_path, "/tmp", "judgemessage.txt"), judgemessage_path);
     lrun_args.append(get_override_lrun_args(etc_dir, cache_dir, interactor_path, ENV_RUN, interactor_chroot_path, interactor_dest, run_cmd.size() >= 2 ? (*run_cmd.begin()) : "" ));
     lrun_args.append(get_env_lrun_args(etc_dir, code_path, ENV_RUN));
     lrun_args.append(interactor_limit);
@@ -2407,7 +2418,19 @@ static const vector<int> VALID_CHECKER_EXITCODE = {
   LEGACY_CHECKER_EXITCODE_WRONG_ANSWER
 };
 
-static void run_custom_checker(j::object& result, const string& etc_dir, const string& cache_dir, const string& dest, const string& code_path, const string& checker_code_path, const map<string, string>& envs, const Testcase& testcase, const string& user_output_path, const bool& with_writable_tmp) {
+static void run_custom_checker(
+  j::object& result, 
+  const string& etc_dir, 
+  const string& cache_dir, 
+  const string& dest, 
+  const string& code_path, 
+  const string& checker_code_path, 
+  const map<string, string>& envs, 
+  const Testcase& testcase, 
+  const string& user_output_path, 
+  const bool& with_writable_tmp,
+  const string& judgemessage_path
+) {
   log_debug("run_custom_checker: %s %s", testcase.output_path.c_str(), user_output_path.c_str());
 
   // prepare check environment
@@ -2424,6 +2447,8 @@ static void run_custom_checker(j::object& result, const string& etc_dir, const s
   lrun_args.append("--bindfs-ro", "$chroot/tmp/output", get_full_path(testcase.output_path));
   lrun_args.append("--bindfs-ro", "$chroot/tmp/user_output", get_full_path(user_output_path));
   lrun_args.append("--bindfs-ro", "$chroot/tmp/user_code", get_full_path(code_path));
+  lrun_args.append("--bindfs", "$chroot/tmp/judgemessage.txt", get_full_path(judgemessage_path));
+
 
   for (__typeof(envs.begin()) it = envs.begin(); it != envs.end(); ++it) {
       lrun_args.append("--env", it->first, it->second);
@@ -2470,7 +2495,8 @@ static void run_custom_checker(j::object& result, const string& etc_dir, const s
   result["result"] = j::value(status);
 }
 
-static j::object run_testcase(const string& etc_dir, const string& cache_dir, const string& code_path, const string& interactor_code_path, const string& checker_code_path, const map<string, string>& envs, const Testcase& testcase, bool skip_checker = false, bool keep_stdout = false, bool keep_stderr = false, bool ignore_presentation_error = false, const string& path_as_stdin = "", const string& path_as_stdout = "", const bool& with_writable_tmp = false) {
+// param testcase oass as copy now, multipass needs to change input_path between passes.
+static j::object run_testcase(const string& etc_dir, const string& cache_dir, const string& code_path, const string& interactor_code_path, const string& checker_code_path, const map<string, string>& envs, Testcase testcase, bool skip_checker = false, bool keep_stdout = false, bool keep_stderr = false, bool ignore_presentation_error = false, const string& path_as_stdin = "", const string& path_as_stdout = "", const bool& with_writable_tmp = false) {
   log_debug("run_testcase: %s", testcase.input_path.c_str());
 
   // assume user code and checker code are pre-compiled
@@ -2479,7 +2505,7 @@ static j::object run_testcase(const string& etc_dir, const string& cache_dir, co
   // prepare output file path
   string stdout_path = testcase.user_stdout_path.empty() ? get_temp_file_path(cache_dir, "out") : testcase.user_stdout_path;
   string stderr_path = testcase.user_stderr_path.empty() ? (keep_stderr ? get_temp_file_path(cache_dir, "err") : DEV_NULL) : testcase.user_stderr_path;
-  string input_path = testcase.input_path;
+  string judgemessage_path = !interactor_code_path.empty() || !checker_code_path.empty() ? get_temp_file_path(cache_dir, "judgemessage") : DEV_NULL;
   LrunResult run_result;
   LrunResult interactor_result;
   string interactor_output;
@@ -2489,15 +2515,21 @@ static j::object run_testcase(const string& etc_dir, const string& cache_dir, co
   int iteration = 0;
   do {
     iteration += 1;
+    // fail fast when exceeding max iteration
+    if (multipass && iteration > testcase.max_multipass_iteration) {
+      result["result"] = j::value(TestcaseResult::INTERNAL_ERROR);
+      result["error"] = j::value("iteration limit exceed.");
+      break;
+    }
     // should flock stdout_path, but since we use different tmp path, and it is scoped in pid dir. no more necessary
     // dest must be the same with dest used in compile_code
     string dest = get_code_work_dir(get_process_tmp_dir(cache_dir), code_path);
     if (interactor_code_path.empty()) {
-      run_result = run_code(etc_dir, cache_dir, dest, code_path, testcase.runtime_limit, input_path, stdout_path, stderr_path, vector<string>() /* extra_lrun_args */, ENV_RUN /* env */, vector<string>() /* extra_argv */, path_as_stdin /* path_as_stdin */, path_as_stdout /* path_as_stdout */, with_writable_tmp /* with_writable_tmp */);
+      run_result = run_code(etc_dir, cache_dir, dest, code_path, testcase.runtime_limit, testcase.input_path, stdout_path, stderr_path, vector<string>() /* extra_lrun_args */, ENV_RUN /* env */, vector<string>() /* extra_argv */, path_as_stdin /* path_as_stdin */, path_as_stdout /* path_as_stdout */, with_writable_tmp /* with_writable_tmp */);
     } else {
       interactor_dest = get_code_work_dir(fs::join(cache_dir, SUBDIR_INTERACTOR), interactor_code_path);
       // run with interactor
-      std::tie(run_result, interactor_result) = run_code_with_interactor(etc_dir, cache_dir, dest, code_path, testcase.runtime_limit, interactor_dest, interactor_code_path, testcase.interactor_limit, testcase, input_path, stdout_path, stderr_path, vector<string>() /* extra_lrun_args */, ENV_RUN /* env */, vector<string>() /* extra_argv */, with_writable_tmp /* with_writable_tmp */);
+      std::tie(run_result, interactor_result) = run_code_with_interactor(etc_dir, cache_dir, dest, code_path, testcase.runtime_limit, interactor_dest, interactor_code_path, testcase.interactor_limit, testcase, testcase.input_path, stdout_path, stderr_path, vector<string>() /* extra_lrun_args */, ENV_RUN /* env */, vector<string>() /* extra_argv */, with_writable_tmp /* with_writable_tmp */, judgemessage_path);
       interactor_output = fs::nread(stdout_path, TRUNC_LOG);
     }
 
@@ -2605,7 +2637,7 @@ static j::object run_testcase(const string& etc_dir, const string& cache_dir, co
       } else {
         // dest must be the same as the dest used for compile_code
         checker_dest = get_code_work_dir(fs::join(cache_dir, SUBDIR_CHECKER), checker_code_path);
-        run_custom_checker(result, etc_dir, cache_dir, code_path, checker_dest, checker_code_path, envs, testcase, stdout_path, with_writable_tmp);
+        run_custom_checker(result, etc_dir, cache_dir, checker_dest, code_path, checker_code_path, envs, testcase, stdout_path, with_writable_tmp, judgemessage_path);
       }
     }
 
@@ -2616,43 +2648,38 @@ static j::object run_testcase(const string& etc_dir, const string& cache_dir, co
 
     // multipass result check and loop control
     if (multipass) {
-      if (iteration > testcase.max_multipass_iteration) {
-        result["result"] = j::value(TestcaseResult::INTERNAL_ERROR);
-        result["error"] = j::value("iteration limit exceed.");
-        break;
-      }
       if (result["result"] != j::value(TestcaseResult::ACCEPTED)) {
         break;
       }
-      string nextpass_cache_path = fs::join(cache_dir, format("nextpass.in-%s", get_random_hash()));
+      string nextpass_input_mv_path = get_temp_file_path(cache_dir, "nextpass.in");
+      // string nextpass_input_mv_path = fs::join(cache_dir, format("nextpass.in-%s", get_random_hash()));
+      // register_cleanup_path(nextpass_input_mv_path);
       if (!interactor_code_path.empty()) {
-        log_debug("%s/nextpass.in, %d", interactor_dest.c_str(), fs::exists(fs::join(interactor_dest, "nextpass.in")));
-        string nextpass_path = fs::join(interactor_dest, "nextpass.in");
-        if (!fs::exists(nextpass_path)) {
+        string nextpass_input_path = fs::join(interactor_dest, "nextpass.in");
+        if (!fs::exists(nextpass_input_path)) {
           break;
         }
-        int ret = fs::rename(nextpass_path, nextpass_cache_path);
-        if (!ret) {
+        int ret = fs::rename(nextpass_input_path, nextpass_input_mv_path);
+        if (ret) {
           result["result"] = j::value(TestcaseResult::INTERNAL_ERROR);
           result["error"] = j::value("mv nextpass.in failed.");
           break;
         }
       }
       if (!checker_code_path.empty()) {
-        log_debug("%s/nextpass.in, %d", checker_dest.c_str(), fs::exists(fs::join(checker_dest, "nextpass.in")));
-        string nextpass_path = fs::join(checker_dest, "nextpass.in");
-        if (!fs::exists(nextpass_path)) {
+        string interactor_code_path = fs::join(checker_dest, "nextpass.in");
+        if (!fs::exists(interactor_code_path)) {
           break;
         }
-        int ret = fs::rename(nextpass_path, nextpass_cache_path);
-        if (!ret) {
+        int ret = fs::rename(interactor_code_path, nextpass_input_mv_path);
+        if (ret) {
           result["result"] = j::value(TestcaseResult::INTERNAL_ERROR);
           result["error"] = j::value("mv nextpass.in failed.");
           break;
         }
       }
       // use nextpass.in as next pass input
-      input_path = nextpass_cache_path;
+      testcase.input_path = nextpass_input_mv_path;
     }
   } while (multipass);
 
