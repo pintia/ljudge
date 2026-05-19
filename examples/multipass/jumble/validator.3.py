@@ -43,7 +43,7 @@ def check_writable(path: str) -> bool:
 
 input_file = "input"
 answer_file = "output"
-feedback_dir = "."
+feedback_dir = "feedback_dir/"
 
 team_output = check_readable(sys.argv[1], 0)
 

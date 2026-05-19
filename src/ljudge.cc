@@ -61,6 +61,7 @@ namespace j = picojson;
 #define SUBDIR_CHECKER "checker"
 #define SUBDIR_INTERACTOR "interactor"
 #define SUBDIR_TEMP "tmp"
+#define SUBDIR_FEEDBACK "feedback"
 #define SUBDIR_KERNEL_CONFIG_CACHE "kconfig"
 
 // envs (config file name prefixes)
@@ -2008,6 +2009,16 @@ static string get_process_tmp_dir(const string& cache_dir) {
   return result;
 }
 
+static string get_process_feedback_dir(const string& cache_dir) {
+  static string result;
+  if (result.empty()) {
+    result = fs::join(cache_dir, SUBDIR_FEEDBACK, format("%lu", (unsigned long)(getpid())));
+    enforce_mkdir_p(result);
+    register_cleanup_path(result);
+  }
+  return result;
+}
+
 static string get_code_work_dir(const string& base_dir, const string& code_path) {
   // assume code file doesn't change
   static map<string, string> cache;
@@ -2271,14 +2282,14 @@ static void prepare_checker_mount_bind_files(const string& dest) {
   fs::touch(fs::join(dest, "output"));
   fs::touch(fs::join(dest, "user_output"));
   fs::touch(fs::join(dest, "user_code"));
-  fs::touch(fs::join(dest, "judgemessage.txt"));
+  fs::mkdir(fs::join(dest, "feedback_dir"), 0555);
 }
 
 static void prepare_inteactor_bind_files(const string& dest) {
   fs::touch(fs::join(dest, "input"));
   fs::touch(fs::join(dest, "output"));
   fs::touch(fs::join(dest, "interactor_output"));
-  fs::touch(fs::join(dest, "judgemessage.txt"));
+  fs::mkdir(fs::join(dest, "feedback_dir"), 0555);
 }
 
 static std::pair<LrunResult, LrunResult> run_code_with_interactor(
@@ -2298,7 +2309,7 @@ static std::pair<LrunResult, LrunResult> run_code_with_interactor(
     const string& env = ENV_RUN,
     const vector<string>& extra_argv = vector<string>(),
     const bool& with_writable_tmp = false,
-    const string& judgemessage_path = DEV_NULL
+    const string& feedback_dir_path = DEV_NULL
 ) {
   log_debug("run_code_with_interactor: %s", code_path.c_str());
 
@@ -2375,15 +2386,17 @@ static std::pair<LrunResult, LrunResult> run_code_with_interactor(
     LrunArgs lrun_args;
     lrun_args.append_default();
     lrun_args.append("--chroot", interactor_chroot_path);
-    if (with_writable_tmp || multipass) {
+    if (with_writable_tmp) {
       lrun_args.append("--bindfs", fs::join(interactor_chroot_path, "/tmp"), interactor_dest);
     } else {
       lrun_args.append("--bindfs-ro", fs::join(interactor_chroot_path, "/tmp"), interactor_dest);
     }
+    if (multipass) {
+      lrun_args.append("--bindfs", fs::join(interactor_chroot_path, "/tmp/feedback_dir"), feedback_dir_path);
+    }
     lrun_args.append("--bindfs-ro", fs::join(interactor_chroot_path, "/tmp", "input"), get_full_path(testcase.input_path));
     lrun_args.append("--bindfs", fs::join(interactor_chroot_path, "/tmp", "interactor_output"), stdout_path);
     lrun_args.append("--bindfs-ro", fs::join(interactor_chroot_path, "/tmp", "output"), get_full_path(testcase.output_path));
-    lrun_args.append("--bindfs", fs::join(interactor_chroot_path, "/tmp", "judgemessage.txt"), judgemessage_path);
     lrun_args.append(get_override_lrun_args(etc_dir, cache_dir, interactor_path, ENV_RUN, interactor_chroot_path, interactor_dest, run_cmd.size() >= 2 ? (*run_cmd.begin()) : "" ));
     lrun_args.append(get_env_lrun_args(etc_dir, code_path, ENV_RUN));
     lrun_args.append(interactor_limit);
@@ -2429,7 +2442,7 @@ static void run_custom_checker(
   const Testcase& testcase, 
   const string& user_output_path, 
   const bool& with_writable_tmp,
-  const string& judgemessage_path
+  const string& feedback_dir_path
 ) {
   log_debug("run_custom_checker: %s %s", testcase.output_path.c_str(), user_output_path.c_str());
 
@@ -2447,8 +2460,10 @@ static void run_custom_checker(
   lrun_args.append("--bindfs-ro", "$chroot/tmp/output", get_full_path(testcase.output_path));
   lrun_args.append("--bindfs-ro", "$chroot/tmp/user_output", get_full_path(user_output_path));
   lrun_args.append("--bindfs-ro", "$chroot/tmp/user_code", get_full_path(code_path));
-  lrun_args.append("--bindfs", "$chroot/tmp/judgemessage.txt", get_full_path(judgemessage_path));
-
+  bool multipass = testcase.max_multipass_iteration > 0;
+  if (multipass) {
+    lrun_args.append("--bindfs", "$chroot/tmp/feedback_dir", get_full_path(feedback_dir_path));
+  }
 
   for (__typeof(envs.begin()) it = envs.begin(); it != envs.end(); ++it) {
       lrun_args.append("--env", it->first, it->second);
@@ -2457,7 +2472,6 @@ static void run_custom_checker(
   // run checker
   string checker_output;
   LrunResult lrun_result;
-  bool multipass = testcase.max_multipass_iteration > 0;
   {
     string output_path = get_temp_file_path(cache_dir, "checker-out");
     // should flock output_path, but since we use different tmp path, and it is scoped in pid dir. no more necessary
@@ -2465,7 +2479,7 @@ static void run_custom_checker(
     vector<string> checker_argv;
     checker_argv.push_back("user_output");
 
-    lrun_result = run_code(etc_dir, cache_dir, dest, checker_code_path, testcase.checker_limit, testcase.input_path, output_path, output_path /* stderr */, lrun_args, ENV_CHECK, checker_argv, "", "", with_writable_tmp || multipass);
+    lrun_result = run_code(etc_dir, cache_dir, dest, checker_code_path, testcase.checker_limit, testcase.input_path, output_path, output_path /* stderr */, lrun_args, ENV_CHECK, checker_argv, "", "", with_writable_tmp);
     checker_output = fs::nread(output_path, TRUNC_LOG);
   }
   string status = TestcaseResult::CHECKER_ERROR;
@@ -2505,13 +2519,13 @@ static j::object run_testcase(const string& etc_dir, const string& cache_dir, co
   // prepare output file path
   string stdout_path = testcase.user_stdout_path.empty() ? get_temp_file_path(cache_dir, "out") : testcase.user_stdout_path;
   string stderr_path = testcase.user_stderr_path.empty() ? (keep_stderr ? get_temp_file_path(cache_dir, "err") : DEV_NULL) : testcase.user_stderr_path;
-  string judgemessage_path = !interactor_code_path.empty() || !checker_code_path.empty() ? get_temp_file_path(cache_dir, "judgemessage") : DEV_NULL;
   LrunResult run_result;
   LrunResult interactor_result;
   string interactor_output;
   string interactor_dest;
   string checker_dest;
   bool multipass = testcase.max_multipass_iteration > 0;
+  string feedback_dir_path = multipass ? get_process_feedback_dir(cache_dir) : DEV_NULL;
   int iteration = 0;
   do {
     iteration += 1;
@@ -2529,7 +2543,7 @@ static j::object run_testcase(const string& etc_dir, const string& cache_dir, co
     } else {
       interactor_dest = get_code_work_dir(fs::join(cache_dir, SUBDIR_INTERACTOR), interactor_code_path);
       // run with interactor
-      std::tie(run_result, interactor_result) = run_code_with_interactor(etc_dir, cache_dir, dest, code_path, testcase.runtime_limit, interactor_dest, interactor_code_path, testcase.interactor_limit, testcase, testcase.input_path, stdout_path, stderr_path, vector<string>() /* extra_lrun_args */, ENV_RUN /* env */, vector<string>() /* extra_argv */, with_writable_tmp /* with_writable_tmp */, judgemessage_path);
+      std::tie(run_result, interactor_result) = run_code_with_interactor(etc_dir, cache_dir, dest, code_path, testcase.runtime_limit, interactor_dest, interactor_code_path, testcase.interactor_limit, testcase, testcase.input_path, stdout_path, stderr_path, vector<string>() /* extra_lrun_args */, ENV_RUN /* env */, vector<string>() /* extra_argv */, with_writable_tmp /* with_writable_tmp */, feedback_dir_path);
       interactor_output = fs::nread(stdout_path, TRUNC_LOG);
     }
 
@@ -2637,7 +2651,7 @@ static j::object run_testcase(const string& etc_dir, const string& cache_dir, co
       } else {
         // dest must be the same as the dest used for compile_code
         checker_dest = get_code_work_dir(fs::join(cache_dir, SUBDIR_CHECKER), checker_code_path);
-        run_custom_checker(result, etc_dir, cache_dir, checker_dest, code_path, checker_code_path, envs, testcase, stdout_path, with_writable_tmp, judgemessage_path);
+        run_custom_checker(result, etc_dir, cache_dir, checker_dest, code_path, checker_code_path, envs, testcase, stdout_path, with_writable_tmp, feedback_dir_path);
       }
     }
 
@@ -2652,31 +2666,15 @@ static j::object run_testcase(const string& etc_dir, const string& cache_dir, co
         break;
       }
       string nextpass_input_mv_path = get_temp_file_path(cache_dir, "nextpass.in");
-      // string nextpass_input_mv_path = fs::join(cache_dir, format("nextpass.in-%s", get_random_hash()));
-      // register_cleanup_path(nextpass_input_mv_path);
-      if (!interactor_code_path.empty()) {
-        string nextpass_input_path = fs::join(interactor_dest, "nextpass.in");
-        if (!fs::exists(nextpass_input_path)) {
-          break;
-        }
-        int ret = fs::rename(nextpass_input_path, nextpass_input_mv_path);
-        if (ret) {
-          result["result"] = j::value(TestcaseResult::INTERNAL_ERROR);
-          result["error"] = j::value("mv nextpass.in failed.");
-          break;
-        }
+      string nextpass_input_path = fs::join(feedback_dir_path, "nextpass.in");
+      if (!fs::exists(nextpass_input_path)) {
+        break;
       }
-      if (!checker_code_path.empty()) {
-        string interactor_code_path = fs::join(checker_dest, "nextpass.in");
-        if (!fs::exists(interactor_code_path)) {
-          break;
-        }
-        int ret = fs::rename(interactor_code_path, nextpass_input_mv_path);
-        if (ret) {
-          result["result"] = j::value(TestcaseResult::INTERNAL_ERROR);
-          result["error"] = j::value("mv nextpass.in failed.");
-          break;
-        }
+      int ret = fs::rename(nextpass_input_path, nextpass_input_mv_path);
+      if (ret) {
+        result["result"] = j::value(TestcaseResult::INTERNAL_ERROR);
+        result["error"] = j::value("mv nextpass.in failed.");
+        break;
       }
       // use nextpass.in as next pass input
       testcase.input_path = nextpass_input_mv_path;
