@@ -16,6 +16,7 @@
                 devShells.default = pkgs.mkShell {
                     buildInputs = with pkgs; [
                         gcc
+                        gdb
                         gnumake
                         ruby
                         rake

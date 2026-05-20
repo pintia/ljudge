@@ -1385,7 +1385,7 @@ class Validator {
 		}
 	}
 
-	static const int ret_AC = 42, ret_WA = 1;
+	static const int ret_AC = 0, ret_WA = 1;
 	std::istream& in  = std::cin;
 	std::ostream& out = std::cout;
 

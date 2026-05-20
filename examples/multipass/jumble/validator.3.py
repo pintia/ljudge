@@ -47,7 +47,7 @@ feedback_dir = "feedback_dir/"
 
 team_output = check_readable(sys.argv[1], 0)
 
-AC = 42
+AC = 0
 WA = 1
 
 # All of those errors are unexpected and are errors with the judgehost

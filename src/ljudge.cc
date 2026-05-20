@@ -2420,14 +2420,12 @@ static std::pair<LrunResult, LrunResult> run_code_with_interactor(
 static const int CHECKER_EXITCODE_ACCEPTED = 0;
 static const int CHECKER_EXITCODE_WRONG_ANSWER = 1;
 static const int CHECKER_EXITCODE_PRESENTATION_ERROR = 2;
-static const int CHECKER_EXITCODE_MULTIPASS_ACCEPTED = 42;
 // In most unix systems exit code is limited to 8 bits, -1 becomes 255
 static const int LEGACY_CHECKER_EXITCODE_WRONG_ANSWER = 255;
 static const vector<int> VALID_CHECKER_EXITCODE = {
   CHECKER_EXITCODE_ACCEPTED, 
   CHECKER_EXITCODE_WRONG_ANSWER, 
   CHECKER_EXITCODE_PRESENTATION_ERROR, 
-  CHECKER_EXITCODE_MULTIPASS_ACCEPTED, 
   LEGACY_CHECKER_EXITCODE_WRONG_ANSWER
 };
 
@@ -2497,8 +2495,6 @@ static void run_custom_checker(
     status = TestcaseResult::WRONG_ANSWER;
   } else if (lrun_result.exit_code == CHECKER_EXITCODE_PRESENTATION_ERROR) {
     status = TestcaseResult::PRESENTATION_ERROR;
-  } else if (multipass && lrun_result.exit_code == CHECKER_EXITCODE_MULTIPASS_ACCEPTED) {
-    status = TestcaseResult::ACCEPTED;
   } else {
     error_message = format("unknown checker exit code %d", lrun_result.exit_code);
   }
@@ -2643,6 +2639,9 @@ static j::object run_testcase(const string& etc_dir, const string& cache_dir, co
 
     if (skip_checker) {
       // just accept it
+      result["result"] = j::value(TestcaseResult::ACCEPTED);
+    } else if (multipass && checker_code_path.empty()) {
+      // no previous error
       result["result"] = j::value(TestcaseResult::ACCEPTED);
     } else {
       // run checker
