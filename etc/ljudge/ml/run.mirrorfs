@@ -1,5 +1,6 @@
-mkdir /dev
-mkdir /tmp
+mkdir /dev/
+mkdir /tmp/
+mkdir /work/
 mirror /lib/
 mirror /lib64/
 mirror /usr/lib*/

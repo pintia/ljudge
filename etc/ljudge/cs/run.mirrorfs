@@ -1,6 +1,7 @@
-mkdir /dev
-mkdir /proc
-mkdir /tmp
+mkdir /dev/
+mkdir /proc/
+mkdir /tmp/
+mkdir /work/
 mirror /lib/
 mirror /lib64/
 mirror /var/lib/
