@@ -397,6 +397,7 @@ int cleanup_exit(int code) {
 }
 
 void enforce_mkdir_p(const string& dir) {
+  fprintf(stderr, "DEBUG enforce_mkdir_p: %s\n", dir.c_str());
   if (fs::mkdir_p(dir) < 0) fatal("cannot mkdir: %s", dir.c_str());
 }
 

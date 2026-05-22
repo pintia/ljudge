@@ -183,7 +183,10 @@ int fs::mkdir_p(const string& dir, const mode_t mode) {
   }
   int e = mkdir(dir.c_str(), mode);
 
-  if (e < 0 /* && errno != EEXIST */) return -1;
+  if (e < 0 /* && errno != EEXIST */) {
+    fprintf(stderr, "DEBUG mkdir_p: %s failed, errno=%d (%s)\n", dir.c_str(), errno, strerror(errno));
+    return -1;
+  }
   return nmkdir;
 }
 
