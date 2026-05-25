@@ -164,8 +164,6 @@ struct Options {
   bool ignore_presentation_error = false;
   string path_as_stdin; // if not empty, user program should read data from path;
   string path_as_stdout; // if not empty, user program should write data to path;
-  // bool with_writable_tmp = false; // if true, when running, tmp dir is writable;
-  size_t tmp_dir_size = 0;
 };
 
 struct LrunArgs : public vector<string> {
@@ -397,7 +395,6 @@ int cleanup_exit(int code) {
 }
 
 void enforce_mkdir_p(const string& dir) {
-  fprintf(stderr, "DEBUG enforce_mkdir_p: %s\n", dir.c_str());
   if (fs::mkdir_p(dir) < 0) fatal("cannot mkdir: %s", dir.c_str());
 }
 
@@ -2172,8 +2169,6 @@ static LrunResult run_code(
     const vector<string>& extra_argv = vector<string>(),
     const string& path_as_stdin = "",
     const string& path_as_stdout = ""
-    // const bool with_writable_tmp = false
-    // const size_t& tmp_dir_size = 0
 ) {
   log_debug("run_code: %s", code_path.c_str());
 
@@ -2315,8 +2310,6 @@ static std::pair<LrunResult, LrunResult> run_code_with_interactor(
     const vector<string>& extra_lrun_args = vector<string>(),
     const string& env = ENV_RUN,
     const vector<string>& extra_argv = vector<string>(),
-    // const bool& with_writable_tmp = false,
-    // const size_t& tmp_dir_size = 0,
     const string& feedback_dir_path = DEV_NULL
 ) {
   log_debug("run_code_with_interactor: %s", code_path.c_str());
@@ -2439,8 +2432,6 @@ static void run_custom_checker(
   const map<string, string>& envs, 
   const Testcase& testcase, 
   const string& user_output_path, 
-  // const bool& with_writable_tmp,
-  // const size_t& tmp_dir_size,
   const string& feedback_dir_path
 ) {
   log_debug("run_custom_checker: %s %s", testcase.output_path.c_str(), user_output_path.c_str());
@@ -2543,10 +2534,6 @@ static j::object run_testcase(const string& etc_dir, const string& cache_dir, co
       std::tie(run_result, interactor_result) = run_code_with_interactor(etc_dir, cache_dir, dest, code_path, testcase.runtime_limit, interactor_dest, interactor_code_path, testcase.interactor_limit, testcase, testcase.input_path, stdout_path, stderr_path, vector<string>() /* extra_lrun_args */, ENV_RUN /* env */, vector<string>() /* extra_argv */, feedback_dir_path);
       interactor_output = fs::nread(stdout_path, TRUNC_LOG);
     }
-
-    // use path instead of original stdout file
-    // if (!path_as_stdout.empty())
-    //   stdout_path = fs::join(dest, path_as_stdout);
 
     // write stdout, stderr
     if (keep_stdout) result["stdout"] = j::value(fs::nread(stdout_path, TRUNC_LOG));
