@@ -1,7 +1,8 @@
-mkdir /dev
-mkdir /tmp
+mkdir /dev/
+mkdir /tmp/
+mkdir /work/
 # java needs /proc/self/exe to know its path
-mkdir /proc
+mkdir /proc/
 mirror /lib/
 mirror /lib64/
 mirror /usr/lib*/

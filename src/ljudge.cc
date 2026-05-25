@@ -64,6 +64,10 @@ namespace j = picojson;
 #define SUBDIR_FEEDBACK "feedback"
 #define SUBDIR_KERNEL_CONFIG_CACHE "kconfig"
 
+// sub-directory names in after chroot environment
+#define BOXDIR_HOME "/work"
+#define BOXDIR_TEMP "/tmp"
+
 // envs (config file name prefixes)
 #define ENV_CHECK "check"
 #define ENV_COMPILE "compile"
@@ -160,7 +164,6 @@ struct Options {
   bool ignore_presentation_error = false;
   string path_as_stdin; // if not empty, user program should read data from path;
   string path_as_stdout; // if not empty, user program should write data to path;
-  bool with_writable_tmp = false; // if true, when running, tmp dir is writable;
 };
 
 struct LrunArgs : public vector<string> {
@@ -237,11 +240,12 @@ struct LrunArgs : public vector<string> {
     } else {
       append("--network", "false");
     }
-    append("--chdir", "/tmp");
+    append("--tmpfs", BOXDIR_TEMP, std::to_string(1 << 25));
+    append("--chdir", BOXDIR_HOME);
     append("--env", "ONLINE_JUDGE", "1");
     append("--env", "LANG", "en_US.UTF-8");
     append("--env", "LC_ALL", "en_US.UTF-8");
-    append("--env", "HOME", "/tmp");
+    append("--env", "HOME", BOXDIR_HOME);
     append("--env", "PATH", "/usr/bin:/bin:/etc/alternatives:/usr/local/bin");
   }
 
@@ -485,10 +489,10 @@ static string get_src_name(const string& etc_dir, const string& code_path) {
 
 static string prepare_dummy_passwd(const string& cache_dir) {
 #ifdef _OPENMP
-  ScopedOMPLock("dummy_passwd_lock");
+  ScopedOMPLock lock("dummy_passwd_lock");
 #endif
-  string path = fs::join(cache_dir, format("tmp/etc/passwd-%d", (int)getuid()));
-  string content = format("nobody:%d:%d::/tmp:/bin/false\n", (int)getuid(), (int)getgid());
+  string path = fs::join(cache_dir, SUBDIR_TEMP, format("etc/passwd-%d", (int)getuid()));
+  string content = format("nobody:%d:%d::" BOXDIR_HOME ":/bin/false\n", (int)getuid(), (int)getgid());
   if (!fs::exists(path) || fs::read(path) != content) {
     enforce_mkdir_p(fs::dirname(path));
     fs::touch(path);
@@ -534,7 +538,7 @@ static list<string> get_override_lrun_args(const string& etc_dir, const string& 
           string name = *it;
           string path = name;
           string_replacei(path, "__", "/");
-          if (fs::is_accessible(get_config_path(etc_dir, code_path, name), R_OK) && path.rfind("/tmp") == 0) {
+          if (fs::is_accessible(get_config_path(etc_dir, code_path, name), R_OK) && path.rfind(BOXDIR_HOME) == 0) {
               string inner_path = path.substr(4);
               fs::mkdir_p(fs::join(dest, fs::dirname(inner_path)));
               fs::touch(fs::join(dest, fs::basename(inner_path)));
@@ -627,8 +631,7 @@ static L filter_user_lrun_args(const L& items, const string& cache_dir) {
     if (item == "--syscalls" || item == "--domainname" || item == "--hostname" || item == "--ostype" \
         || item == "--osrelease" || item == "--osversion") {
       next_safe = 1;
-    } else if (item == "--fopen-filter" || item == "--tmpfs" || item == "--env") {
-      // tmpfs maybe unsafe, we only use it in R lang.
+    } else if (item == "--fopen-filter") {
       next_safe = 2;
       if (!is_fopen_filter_supported(cache_dir)) {
         next_ignored = next_safe;
@@ -727,7 +730,7 @@ static string prepare_chroot(const string& etc_dir, const string& code_path, con
   {
     // lock both processes and threads
 #ifdef _OPENMP
-    ScopedOMPLock("chroot_lock");
+    ScopedOMPLock lock("chroot_lock");
 #endif
     // enforce_mkdir_p(base_dir);
     fs::ScopedFileLock chroot_dir_lock(mirrorfs_config_path);
@@ -1317,7 +1320,7 @@ static Options parse_cli_options(int argc, const char *argv[]) {
 
   // default options
   {
-    string home = getenv("HOME") ? getenv("HOME") : "/tmp";
+    string home = getenv("HOME") ? getenv("HOME") : BOXDIR_HOME;
     string etc_dir_candidates[] = { "/etc/ljudge", fs::join(home, ".config/ljudge"), fs::join(home, "ljudge/etc/ljudge"), "./etc/ljudge", "../etc/ljudge" };
     for (size_t i = 0; i < sizeof(etc_dir_candidates) / sizeof(etc_dir_candidates[0]); ++i) {
       if (fs::is_dir(etc_dir_candidates[i])) {
@@ -1527,8 +1530,6 @@ static Options parse_cli_options(int argc, const char *argv[]) {
       options.total_time_limit = NEXT_NUMBER_ARG;
     } else if (option == "ignore-presentation-error") {
       options.ignore_presentation_error = true;
-    } else if (option == "with-writable-tmp") {
-      options.with_writable_tmp = true;
     } else if (option == "path-as-stdin") {
       if (options.nthread > 1) {
         fatal("'path-as-stdin' does not work with threads");
@@ -2033,7 +2034,7 @@ static string get_code_work_dir(const string& base_dir, const string& code_path)
 static string get_temp_file_path(const string& cache_dir, const string& prefix = "", int len = 10) {
   string dest;
 #ifdef _OPENMP
-  ScopedOMPLock("temp_file_path_lock");
+  ScopedOMPLock lock("temp_file_path_lock");
 #endif
   do {
     string hash = get_random_hash(len);
@@ -2103,7 +2104,7 @@ static CompileResult compile_code(const string& etc_dir, const string& cache_dir
     LrunArgs lrun_args;
     lrun_args.append_default();
     lrun_args.append("--chroot", chroot_path);
-    lrun_args.append("--bindfs", fs::join(chroot_path, "/tmp"), dest);
+    lrun_args.append("--bindfs", fs::join(chroot_path, BOXDIR_HOME), dest);
     lrun_args.append(limit);
 
     map<string, string> mappings = get_mappings(src_name, exe_name, dest);
@@ -2167,8 +2168,7 @@ static LrunResult run_code(
     const string& env = ENV_RUN,
     const vector<string>& extra_argv = vector<string>(),
     const string& path_as_stdin = "",
-    const string& path_as_stdout = "",
-    const bool with_writable_tmp = false
+    const string& path_as_stdout = ""
 ) {
   log_debug("run_code: %s", code_path.c_str());
 
@@ -2192,18 +2192,20 @@ static LrunResult run_code(
     LrunArgs lrun_args;
     lrun_args.append_default();
     lrun_args.append("--chroot", chroot_path);
-    if (!with_writable_tmp && path_as_stdout.empty()) {
-      lrun_args.append("--bindfs-ro", fs::join(chroot_path, "/tmp"), dest);
-    } else {
-      // configured or user's program will write file.
-      lrun_args.append("--bindfs", fs::join(chroot_path, "/tmp"), dest);
+    lrun_args.append("--bindfs-ro", fs::join(chroot_path, BOXDIR_HOME), dest);
+    if (!path_as_stdout.empty()) {
+      // bind output to file, let users'program write. 
+      string output_path = fs::join(dest, path_as_stdout);
+      fs::mkdir_p(fs::dirname(output_path));
+      fs::touch(output_path);
+      lrun_args.append("--bindfs", fs::join(fs::join(chroot_path, BOXDIR_HOME), path_as_stdout), fs::make_absolute(stdout_path));
     }
     if (!path_as_stdin.empty()) {
       // bind input to file, let user's program read.
       string input_path = fs::join(dest, path_as_stdin);
       fs::mkdir_p(fs::dirname(input_path));
       fs::touch(input_path);
-      lrun_args.append("--bindfs-ro", fs::join(fs::join(chroot_path, "/tmp"), path_as_stdin), fs::make_absolute(stdin_path));
+      lrun_args.append("--bindfs-ro", fs::join(fs::join(chroot_path, BOXDIR_HOME), path_as_stdin), fs::make_absolute(stdin_path));
     }
     lrun_args.append(get_override_lrun_args(etc_dir, cache_dir, code_path, ENV_RUN, chroot_path, dest, run_cmd.size() >= 2 ? (*run_cmd.begin()) : "" ));
     lrun_args.append(get_env_lrun_args(etc_dir, code_path, ENV_RUN));
@@ -2308,7 +2310,6 @@ static std::pair<LrunResult, LrunResult> run_code_with_interactor(
     const vector<string>& extra_lrun_args = vector<string>(),
     const string& env = ENV_RUN,
     const vector<string>& extra_argv = vector<string>(),
-    const bool& with_writable_tmp = false,
     const string& feedback_dir_path = DEV_NULL
 ) {
   log_debug("run_code_with_interactor: %s", code_path.c_str());
@@ -2345,11 +2346,7 @@ static std::pair<LrunResult, LrunResult> run_code_with_interactor(
     LrunArgs lrun_args;
     lrun_args.append_default();
     lrun_args.append("--chroot", user_chroot_path);
-    if (with_writable_tmp) {
-      lrun_args.append("--bindfs", fs::join(user_chroot_path, "/tmp"), dest);
-    } else {
-      lrun_args.append("--bindfs-ro", fs::join(user_chroot_path, "/tmp"), dest);
-    }
+    lrun_args.append("--bindfs-ro", fs::join(user_chroot_path, BOXDIR_HOME), dest);
     lrun_args.append(get_override_lrun_args(etc_dir, cache_dir, code_path, ENV_RUN, user_chroot_path, dest, run_cmd.size() >= 2 ? (*run_cmd.begin()) : "" ));
     lrun_args.append(get_env_lrun_args(etc_dir, code_path, ENV_RUN));
     lrun_args.append(limit);
@@ -2386,17 +2383,13 @@ static std::pair<LrunResult, LrunResult> run_code_with_interactor(
     LrunArgs lrun_args;
     lrun_args.append_default();
     lrun_args.append("--chroot", interactor_chroot_path);
-    if (with_writable_tmp) {
-      lrun_args.append("--bindfs", fs::join(interactor_chroot_path, "/tmp"), interactor_dest);
-    } else {
-      lrun_args.append("--bindfs-ro", fs::join(interactor_chroot_path, "/tmp"), interactor_dest);
-    }
+    lrun_args.append("--bindfs-ro", fs::join(interactor_chroot_path, BOXDIR_HOME), interactor_dest);
     if (multipass) {
-      lrun_args.append("--bindfs", fs::join(interactor_chroot_path, "/tmp/feedback_dir"), feedback_dir_path);
+      lrun_args.append("--bindfs", fs::join(interactor_chroot_path, BOXDIR_HOME, "feedback_dir"), feedback_dir_path);
     }
-    lrun_args.append("--bindfs-ro", fs::join(interactor_chroot_path, "/tmp", "input"), get_full_path(testcase.input_path));
-    lrun_args.append("--bindfs", fs::join(interactor_chroot_path, "/tmp", "interactor_output"), stdout_path);
-    lrun_args.append("--bindfs-ro", fs::join(interactor_chroot_path, "/tmp", "output"), get_full_path(testcase.output_path));
+    lrun_args.append("--bindfs-ro", fs::join(interactor_chroot_path, BOXDIR_HOME, "input"), get_full_path(testcase.input_path));
+    lrun_args.append("--bindfs", fs::join(interactor_chroot_path, BOXDIR_HOME, "interactor_output"), stdout_path);
+    lrun_args.append("--bindfs-ro", fs::join(interactor_chroot_path, BOXDIR_HOME, "output"), get_full_path(testcase.output_path));
     lrun_args.append(get_override_lrun_args(etc_dir, cache_dir, interactor_path, ENV_RUN, interactor_chroot_path, interactor_dest, run_cmd.size() >= 2 ? (*run_cmd.begin()) : "" ));
     lrun_args.append(get_env_lrun_args(etc_dir, code_path, ENV_RUN));
     lrun_args.append(interactor_limit);
@@ -2439,7 +2432,6 @@ static void run_custom_checker(
   const map<string, string>& envs, 
   const Testcase& testcase, 
   const string& user_output_path, 
-  const bool& with_writable_tmp,
   const string& feedback_dir_path
 ) {
   log_debug("run_custom_checker: %s %s", testcase.output_path.c_str(), user_output_path.c_str());
@@ -2454,13 +2446,13 @@ static void run_custom_checker(
   // extra lrun args
   
   LrunArgs lrun_args;
-  lrun_args.append("--bindfs-ro", "$chroot/tmp/input", get_full_path(testcase.input_path));
-  lrun_args.append("--bindfs-ro", "$chroot/tmp/output", get_full_path(testcase.output_path));
-  lrun_args.append("--bindfs-ro", "$chroot/tmp/user_output", get_full_path(user_output_path));
-  lrun_args.append("--bindfs-ro", "$chroot/tmp/user_code", get_full_path(code_path));
+  lrun_args.append("--bindfs-ro", "$chroot" BOXDIR_HOME "/input", get_full_path(testcase.input_path));
+  lrun_args.append("--bindfs-ro", "$chroot" BOXDIR_HOME "/output", get_full_path(testcase.output_path));
+  lrun_args.append("--bindfs-ro", "$chroot" BOXDIR_HOME "/user_output", get_full_path(user_output_path));
+  lrun_args.append("--bindfs-ro", "$chroot" BOXDIR_HOME "/user_code", get_full_path(code_path));
   bool multipass = testcase.max_multipass_iteration > 0;
   if (multipass) {
-    lrun_args.append("--bindfs", "$chroot/tmp/feedback_dir", get_full_path(feedback_dir_path));
+    lrun_args.append("--bindfs", "$chroot" BOXDIR_HOME "/feedback_dir", get_full_path(feedback_dir_path));
   }
 
   for (__typeof(envs.begin()) it = envs.begin(); it != envs.end(); ++it) {
@@ -2477,7 +2469,7 @@ static void run_custom_checker(
     vector<string> checker_argv;
     checker_argv.push_back("user_output");
 
-    lrun_result = run_code(etc_dir, cache_dir, dest, checker_code_path, testcase.checker_limit, testcase.input_path, output_path, output_path /* stderr */, lrun_args, ENV_CHECK, checker_argv, "", "", with_writable_tmp);
+    lrun_result = run_code(etc_dir, cache_dir, dest, checker_code_path, testcase.checker_limit, testcase.input_path, output_path, output_path /* stderr */, lrun_args, ENV_CHECK, checker_argv, "", "");
     checker_output = fs::nread(output_path, TRUNC_LOG);
   }
   string status = TestcaseResult::CHECKER_ERROR;
@@ -2506,7 +2498,7 @@ static void run_custom_checker(
 }
 
 // param testcase oass as copy now, multipass needs to change input_path between passes.
-static j::object run_testcase(const string& etc_dir, const string& cache_dir, const string& code_path, const string& interactor_code_path, const string& checker_code_path, const map<string, string>& envs, Testcase testcase, bool skip_checker = false, bool keep_stdout = false, bool keep_stderr = false, bool ignore_presentation_error = false, const string& path_as_stdin = "", const string& path_as_stdout = "", const bool& with_writable_tmp = false) {
+static j::object run_testcase(const string& etc_dir, const string& cache_dir, const string& code_path, const string& interactor_code_path, const string& checker_code_path, const map<string, string>& envs, Testcase testcase, bool skip_checker = false, bool keep_stdout = false, bool keep_stderr = false, bool ignore_presentation_error = false, const string& path_as_stdin = "", const string& path_as_stdout = "") {
   log_debug("run_testcase: %s", testcase.input_path.c_str());
 
   // assume user code and checker code are pre-compiled
@@ -2533,19 +2525,15 @@ static j::object run_testcase(const string& etc_dir, const string& cache_dir, co
     }
     // should flock stdout_path, but since we use different tmp path, and it is scoped in pid dir. no more necessary
     // dest must be the same with dest used in compile_code
-    string dest = get_code_work_dir(get_process_tmp_dir(cache_dir), code_path);
+    string dest = get_code_work_dir(fs::join(cache_dir, SUBDIR_USER_CODE), code_path);
     if (interactor_code_path.empty()) {
-      run_result = run_code(etc_dir, cache_dir, dest, code_path, testcase.runtime_limit, testcase.input_path, stdout_path, stderr_path, vector<string>() /* extra_lrun_args */, ENV_RUN /* env */, vector<string>() /* extra_argv */, path_as_stdin /* path_as_stdin */, path_as_stdout /* path_as_stdout */, with_writable_tmp /* with_writable_tmp */);
+      run_result = run_code(etc_dir, cache_dir, dest, code_path, testcase.runtime_limit, testcase.input_path, stdout_path, stderr_path, vector<string>() /* extra_lrun_args */, ENV_RUN /* env */, vector<string>() /* extra_argv */, path_as_stdin /* path_as_stdin */, path_as_stdout /* path_as_stdout */);
     } else {
       interactor_dest = get_code_work_dir(fs::join(cache_dir, SUBDIR_INTERACTOR), interactor_code_path);
       // run with interactor
-      std::tie(run_result, interactor_result) = run_code_with_interactor(etc_dir, cache_dir, dest, code_path, testcase.runtime_limit, interactor_dest, interactor_code_path, testcase.interactor_limit, testcase, testcase.input_path, stdout_path, stderr_path, vector<string>() /* extra_lrun_args */, ENV_RUN /* env */, vector<string>() /* extra_argv */, with_writable_tmp /* with_writable_tmp */, feedback_dir_path);
+      std::tie(run_result, interactor_result) = run_code_with_interactor(etc_dir, cache_dir, dest, code_path, testcase.runtime_limit, interactor_dest, interactor_code_path, testcase.interactor_limit, testcase, testcase.input_path, stdout_path, stderr_path, vector<string>() /* extra_lrun_args */, ENV_RUN /* env */, vector<string>() /* extra_argv */, feedback_dir_path);
       interactor_output = fs::nread(stdout_path, TRUNC_LOG);
     }
-
-    // use path instead of original stdout file
-    if (!path_as_stdout.empty())
-      stdout_path = fs::join(dest, path_as_stdout);
 
     // write stdout, stderr
     if (keep_stdout) result["stdout"] = j::value(fs::nread(stdout_path, TRUNC_LOG));
@@ -2650,7 +2638,7 @@ static j::object run_testcase(const string& etc_dir, const string& cache_dir, co
       } else {
         // dest must be the same as the dest used for compile_code
         checker_dest = get_code_work_dir(fs::join(cache_dir, SUBDIR_CHECKER), checker_code_path);
-        run_custom_checker(result, etc_dir, cache_dir, checker_dest, code_path, checker_code_path, envs, testcase, stdout_path, with_writable_tmp, feedback_dir_path);
+        run_custom_checker(result, etc_dir, cache_dir, checker_dest, code_path, checker_code_path, envs, testcase, stdout_path, feedback_dir_path);
       }
     }
 
@@ -2694,7 +2682,7 @@ static j::value run_testcases(const Options& opts) {
   if (opts.total_time_limit > 0 || opts.skip_on_first_failure) {
     double total_time = 0;
     for (int i = 0; i < (int)opts.cases.size(); ++i) {
-      j::object testcase_result = run_testcase(opts.etc_dir, opts.cache_dir, opts.user_code_path, opts.interactor_code_path, opts.checker_code_path, opts.envs, opts.cases[i], opts.skip_checker, opts.keep_stdout, opts.keep_stderr, opts.ignore_presentation_error, opts.path_as_stdin, opts.path_as_stdout, opts.with_writable_tmp);
+      j::object testcase_result = run_testcase(opts.etc_dir, opts.cache_dir, opts.user_code_path, opts.interactor_code_path, opts.checker_code_path, opts.envs, opts.cases[i], opts.skip_checker, opts.keep_stdout, opts.keep_stderr, opts.ignore_presentation_error, opts.path_as_stdin, opts.path_as_stdout);
       results[i] = j::value(testcase_result);
       if (!testcase_result["time"].is<j::null>()) {
         total_time += testcase_result["time"].get<double>();
@@ -2721,7 +2709,7 @@ static j::value run_testcases(const Options& opts) {
     #pragma omp parallel for if (opts.nthread != 1 && opts.cases.size() > 1)
 #endif
     for (int i = 0; i < (int)opts.cases.size(); ++i) {
-      j::object testcase_result = run_testcase(opts.etc_dir, opts.cache_dir, opts.user_code_path, opts.interactor_code_path, opts.checker_code_path, opts.envs, opts.cases[i], opts.skip_checker, opts.keep_stdout, opts.keep_stderr, opts.ignore_presentation_error, opts.path_as_stdin, opts.path_as_stdout, opts.with_writable_tmp);
+      j::object testcase_result = run_testcase(opts.etc_dir, opts.cache_dir, opts.user_code_path, opts.interactor_code_path, opts.checker_code_path, opts.envs, opts.cases[i], opts.skip_checker, opts.keep_stdout, opts.keep_stderr, opts.ignore_presentation_error, opts.path_as_stdin, opts.path_as_stdout);
       results[i] = j::value(testcase_result);
     }
   }
@@ -2766,7 +2754,7 @@ int main(int argc, char const *argv[]) {
   srand((time(0) << 4) | getpid());
 
   { // precompile user code
-    string dest = get_code_work_dir(get_process_tmp_dir(opts.cache_dir), opts.user_code_path);
+    string dest = get_code_work_dir(fs::join(opts.cache_dir, SUBDIR_USER_CODE), opts.user_code_path);
     CompileResult compile_result = compile_code(opts.etc_dir, opts.cache_dir, dest, opts.user_code_path, opts.compiler_limit);
     write_compile_result(jo, compile_result, "compilation");
     if (!compile_result.success) compiled = false;
