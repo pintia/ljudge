@@ -788,7 +788,6 @@ static void print_usage() {
       "         [--ignore-presentation-error]\n"
       "         [--total-time-limit seconds]\n"
       "         [--path-as-stdin] [--path-as-stdout]\n"
-      "         [--with-writable-tmp]\n"
       "         [--max-cpu-time seconds] [--max-real-time seconds]\n"
       "         [--max-memory bytes] [--max-output bytes] [--max-stack bytes]\n"
       "         [--max-checker-cpu-time seconds] [--max-checker-real-time seconds]\n"
