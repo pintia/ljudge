@@ -492,7 +492,7 @@ static string get_src_name(const string& etc_dir, const string& code_path) {
 
 static string prepare_dummy_passwd(const string& cache_dir) {
 #ifdef _OPENMP
-  ScopedOMPLock("dummy_passwd_lock");
+  ScopedOMPLock lock("dummy_passwd_lock");
 #endif
   string path = fs::join(cache_dir, SUBDIR_TEMP, format("etc/passwd-%d", (int)getuid()));
   string content = format("nobody:%d:%d::" BOXDIR_HOME ":/bin/false\n", (int)getuid(), (int)getgid());
@@ -733,7 +733,7 @@ static string prepare_chroot(const string& etc_dir, const string& code_path, con
   {
     // lock both processes and threads
 #ifdef _OPENMP
-    ScopedOMPLock("chroot_lock");
+    ScopedOMPLock lock("chroot_lock");
 #endif
     // enforce_mkdir_p(base_dir);
     fs::ScopedFileLock chroot_dir_lock(mirrorfs_config_path);
@@ -2037,7 +2037,7 @@ static string get_code_work_dir(const string& base_dir, const string& code_path)
 static string get_temp_file_path(const string& cache_dir, const string& prefix = "", int len = 10) {
   string dest;
 #ifdef _OPENMP
-  ScopedOMPLock("temp_file_path_lock");
+  ScopedOMPLock lock("temp_file_path_lock");
 #endif
   do {
     string hash = get_random_hash(len);
