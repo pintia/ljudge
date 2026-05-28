@@ -57,6 +57,7 @@ namespace j = picojson;
 #define TRUNC_LOG 65535
 
 // sub-directory names in cache_dir
+// USER_CODE currently is not used.
 #define SUBDIR_USER_CODE "code"
 #define SUBDIR_CHECKER "checker"
 #define SUBDIR_INTERACTOR "interactor"
@@ -1333,6 +1334,7 @@ static Options parse_cli_options(int argc, const char *argv[]) {
     current_case.checker_limit = { 5, 10, 1 << 30, 1 << 30, 1 << 30 };
     current_case.interactor_limit = { 5, 10, 1 << 30, 1 << 30, 1 << 30 };
     current_case.runtime_limit = { 1, 3, 1 << 26 /* 64M mem */, 1 << 25 /* 32M output */, 1 << 23 /* 8M stack limit */ };
+    current_case.max_multipass_iteration = 0;
     debug_level = getenv("DEBUG") ? 10 : 0;
   }
 
@@ -1538,7 +1540,7 @@ static Options parse_cli_options(int argc, const char *argv[]) {
       options.path_as_stdin = NEXT_STRING_ARG;
     } else if (option == "path-as-stdout") {
       if (options.nthread > 1) {
-          fatal("'path-as-stdout' does not work with threads");
+        fatal("'path-as-stdout' does not work with threads");
       }
       options.nthread = 1;
       REQUIRE_NARGV(1);
@@ -2524,7 +2526,7 @@ static j::object run_testcase(const string& etc_dir, const string& cache_dir, co
     }
     // should flock stdout_path, but since we use different tmp path, and it is scoped in pid dir. no more necessary
     // dest must be the same with dest used in compile_code
-    string dest = get_code_work_dir(fs::join(cache_dir, SUBDIR_USER_CODE), code_path);
+    string dest = get_code_work_dir(get_process_tmp_dir(cache_dir), code_path);
     if (interactor_code_path.empty()) {
       run_result = run_code(etc_dir, cache_dir, dest, code_path, testcase.runtime_limit, testcase.input_path, stdout_path, stderr_path, vector<string>() /* extra_lrun_args */, ENV_RUN /* env */, vector<string>() /* extra_argv */, path_as_stdin /* path_as_stdin */, path_as_stdout /* path_as_stdout */);
     } else {
@@ -2753,7 +2755,8 @@ int main(int argc, char const *argv[]) {
   srand((time(0) << 4) | getpid());
 
   { // precompile user code
-    string dest = get_code_work_dir(fs::join(opts.cache_dir, SUBDIR_USER_CODE), opts.user_code_path);
+    // we do not cache user code compile result, so use tmp dir here
+    string dest = get_code_work_dir(get_process_tmp_dir(opts.cache_dir), opts.user_code_path);
     CompileResult compile_result = compile_code(opts.etc_dir, opts.cache_dir, dest, opts.user_code_path, opts.compiler_limit);
     write_compile_result(jo, compile_result, "compilation");
     if (!compile_result.success) compiled = false;
