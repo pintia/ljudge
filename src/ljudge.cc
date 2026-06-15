@@ -2629,7 +2629,7 @@ static j::object run_testcase(const string& etc_dir, const string& cache_dir, co
     if (skip_checker) {
       // just accept it
       result["result"] = j::value(TestcaseResult::ACCEPTED);
-    } else if (multipass && checker_code_path.empty()) {
+    } else if (multipass && !interactor_code_path.empty()) {
       // no previous error
       result["result"] = j::value(TestcaseResult::ACCEPTED);
     } else {
